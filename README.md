@@ -101,8 +101,9 @@ htpasswd -B -c radicale/config/users yusuf
 mkdir -p data radicale/data
 sudo chown -R 1000:1000 data radicale/data
 
-docker compose up -d --build
-docker compose logs -f bot     # scan QR dari HP
+docker compose up -d radicale   # buat kalender dulu di http://127.0.0.1:5232/
+docker compose up -d --build bot
+docker compose logs -f bot      # scan QR dari HP
 ```
 
 Scan QR lewat WhatsApp → Setelan → **Perangkat tertaut** → Tautkan perangkat.

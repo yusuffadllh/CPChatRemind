@@ -58,27 +58,38 @@ sudo chown -R 1000:1000 data radicale/data
 uid 1000 adalah user `node` di container bot dan `radicale` di image Radicale. Tanpa
 `chown`, container tidak bisa menulis ke bind mount.
 
-### 5. Jalankan dan tautkan WhatsApp
+### 5. Nyalakan Radicale dan buat kalender
+
+Radicale tidak membuat kalender otomatis, dan bot menolak start kalau belum ada kalender.
+Jadi nyalakan Radicale lebih dulu:
 
 ```bash
-docker compose up -d --build
+docker compose up -d radicale
+```
+
+Port 5232 sengaja hanya di-bind ke `127.0.0.1`, jadi akses dari laptop lewat tunnel SSH:
+
+```bash
+ssh -L 5232:127.0.0.1:5232 user@server
+```
+
+Sambil tunnel jalan, buka <http://127.0.0.1:5232/>, login dengan user tadi, lalu
+**Create new addressbook or calendar** → tipe *calendar* → beri nama.
+
+Kalau kamu hanya membuat satu kalender, `CALDAV_CALENDAR` boleh tetap kosong — bot memakai
+kalender pertama yang ditemukan.
+
+### 6. Nyalakan bot dan tautkan WhatsApp
+
+```bash
+docker compose up -d --build bot
 docker compose logs -f bot
 ```
 
 QR muncul di log. Scan lewat WhatsApp → Setelan → **Perangkat tertaut** → Tautkan
 perangkat. Sesi tersimpan di `data/auth/`, jadi restart tidak perlu scan ulang.
 
-### 6. Buat kalender di Radicale
-
-Port 5232 sengaja hanya di-bind ke `127.0.0.1`, jadi akses dari laptop lewat tunnel:
-
-```bash
-ssh -L 5232:127.0.0.1:5232 user@server
-```
-
-Buka <http://127.0.0.1:5232/>, login dengan user tadi, buat kalender baru. Kalau namanya
-kamu isikan ke `CALDAV_CALENDAR`, jalankan `docker compose restart bot`. Kalau dikosongkan,
-bot memakai kalender pertama yang ditemukan.
+Log `WhatsApp tersambung` menandakan bot siap.
 
 ## Reverse proxy HTTPS
 
