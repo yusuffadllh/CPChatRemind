@@ -29,15 +29,22 @@ function stripKeyword(text: string): string | null {
   if (!config.REQUIRE_KEYWORD) return text;
 
   const lower = text.toLowerCase();
-  const hit = config.KEYWORDS.find((keyword) => lower.startsWith(keyword));
+  const hit = config.KEYWORDS.find((keyword) => {
+    if (!lower.startsWith(keyword)) return false;
+    // Batas kata, supaya "/catatan" tidak dianggap "/catat" + "an".
+    const next = lower[keyword.length];
+    return next === undefined || !/[\p{L}\p{N}]/u.test(next);
+  });
   if (!hit) return null;
 
-  const rest = text.slice(hit.length).trim();
+  // Buang pemisah setelah kata kunci, mis. "/catat: beli beras".
+  const rest = text.slice(hit.length).replace(/^[\s:,.\-–—]+/u, '').trim();
   return rest.length > 0 ? rest : null;
 }
 
 export function createHandler(getSocket: () => WASocket) {
-  return async function handle(message: IncomingMessage): Promise<void> {    if (!isAllowed(message)) return;
+  return async function handle(message: IncomingMessage): Promise<void> {
+    if (!isAllowed(message)) return;
 
     const payload = stripKeyword(message.text);
     if (!payload) return;

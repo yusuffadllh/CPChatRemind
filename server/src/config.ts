@@ -18,7 +18,7 @@ const schema = z.object({
   WHITELIST: z.string().default('').transform(csv),
   ALLOW_SELF_CHAT: z.stringbool().default(true),
 
-  REQUIRE_KEYWORD: z.stringbool().default(false),
+  REQUIRE_KEYWORD: z.stringbool().default(true),
   KEYWORDS: z
     .string()
     .default('/catat,/ingatkan,/note')

@@ -7,6 +7,8 @@ Untuk gambaran umum project, lihat [README utama](../README.md).
 Pesan WA → Baileys → react ⏳ → filter → Gemini → CalDAV / notes.jsonl → react 📅 📝 🤷 ❌
 ```
 
+Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau `/note`.
+
 ## Prasyarat
 
 | Kebutuhan | Keterangan |
@@ -139,8 +141,8 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | --- | --- | --- |
 | `ALLOW_SELF_CHAT` | `true` | Proses pesan dari chat ke nomor sendiri |
 | `WHITELIST` | kosong | Nomor lain yang diizinkan, dipisah koma. Format bebas (`+62…`, `08…`) — dicocokkan lewat 9 digit terakhir. Kosong = hanya self-chat |
-| `REQUIRE_KEYWORD` | `false` | `true` = hanya proses pesan berawalan `KEYWORDS` |
-| `KEYWORDS` | `/catat,/ingatkan,/note` | Prefix yang diterima; prefix otomatis dibuang dari judul |
+| `REQUIRE_KEYWORD` | `true` | Hanya proses pesan berawalan `KEYWORDS`. Set `false` kalau mau semua pesan dibaca |
+| `KEYWORDS` | `/catat,/ingatkan,/note` | Awalan yang diterima; dicocokkan tanpa peduli huruf besar-kecil, dan otomatis dibuang dari judul |
 
 **Waktu**
 
@@ -199,7 +201,7 @@ radicale/config/
 | Bot berhenti dengan pesan sesi dicabut | Perangkat tertaut dihapus dari HP. Hapus `data/auth/` lalu scan QR lagi |
 | `Kalender "X" tidak ditemukan` | Nama `CALDAV_CALENDAR` tidak sama dengan di Radicale. Log menampilkan daftar yang tersedia |
 | Container gagal tulis ke `data/` | Bind mount belum di-`chown 1000:1000` |
-| Pesan tidak diproses sama sekali | Cek `ALLOW_SELF_CHAT` / `WHITELIST`, dan kalau `REQUIRE_KEYWORD=true` pastikan pesan berawalan salah satu `KEYWORDS` |
+| Pesan tidak diproses sama sekali | Pesan harus berawalan `/catat`, `/ingatkan`, atau `/note` (default `REQUIRE_KEYWORD=true`). Cek juga `ALLOW_SELF_CHAT` / `WHITELIST` |
 | Event dibuat tapi tidak muncul di HP | Sync DAVx5 masih menunggu polling; tarik-untuk-refresh atau percepat intervalnya |
 | Waktu event ngawur | `TIMEZONE` salah, atau pesannya memang ambigu — cek `LOG_LEVEL=debug` untuk melihat hasil ekstraksi |
 

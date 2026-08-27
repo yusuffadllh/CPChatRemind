@@ -19,14 +19,18 @@
 Bot WhatsApp pribadi yang membaca pesanmu, memahami maksudnya dengan Gemini, lalu
 menuliskannya ke **aplikasi Kalender bawaan Android** atau menyimpannya sebagai catatan.
 
-Tidak ada form, tidak ada tombol. Kirim pesan ke chat *Pesan ke Diri Sendiri*:
+Tidak ada form, tidak ada tombol. Kirim pesan ke chat *Pesan ke Diri Sendiri* dengan awalan
+`/catat` atau `/ingatkan`:
 
 | Kamu kirim | Bot balas | Hasil |
 | --- | --- | --- |
-| `besok jam 3 meeting sama tim` | 📅 | Event besok 15:00 + reminder 30 menit sebelumnya |
-| `Senin depan bayar listrik` | 📅 | Event Senin 09:00 (jam default) |
-| `wifi rumah passwordnya 12345` | 📝 | Tersimpan sebagai catatan |
-| `haha iya bener` | 🤷 | Diabaikan |
+| `/ingatkan besok jam 3 meeting sama tim` | 📅 | Event besok 15:00 + reminder 30 menit sebelumnya |
+| `/ingatkan Senin depan bayar listrik` | 📅 | Event Senin 09:00 (jam default) |
+| `/catat wifi rumah passwordnya 12345` | 📝 | Tersimpan sebagai catatan |
+| `haha iya bener` | — | Tanpa awalan, diabaikan sepenuhnya |
+
+Awalan itu membuat obrolan biasa tidak pernah dikirim ke Gemini — lebih hemat kuota dan
+lebih privat. Kalau mau bot membaca semua pesan, set `REQUIRE_KEYWORD=false`.
 
 React emoji di pesanmu berfungsi sebagai status: ⏳ sedang diproses, 📅 event dibuat,
 📝 dicatat, 🤷 diabaikan, ❌ gagal (bot juga mengutip pesan dan menyebut alasannya).
@@ -72,7 +76,8 @@ Ini juga bukan Google Calendar: datanya tinggal di servermu sendiri.
 - **Bahasa natural Indonesia.** `besok`, `Senin depan`, `nanti sore`, campur bahasa gaul.
 - **Reminder otomatis** sebelum acara (`VALARM`, default 30 menit).
 - **Status lewat react emoji**, jadi terlihat langsung di chat tanpa balasan berisik.
-- **Filter berlapis**: whitelist nomor + prefix kata kunci opsional (`/catat`, `/ingatkan`).
+- **Aktif hanya saat dipanggil.** Kata kunci `/catat` · `/ingatkan` · `/note`, plus whitelist
+  nomor kalau mau menerima perintah dari orang lain.
 - **Turun kelas dengan aman**: kalau Gemini bilang "event" tapi waktunya tidak jelas,
   otomatis disimpan sebagai catatan alih-alih membuat event ngawur.
 - **Tanpa database.** Catatan ditulis sebagai JSONL, deploy tetap sederhana.
