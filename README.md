@@ -1,10 +1,37 @@
-# CPChatRemind
+<h1 align="center">CPChatRemind</h1>
 
-Bot WhatsApp pribadi: kirim pesan biasa ke WhatsApp, lalu Gemini mengubahnya jadi
-**event di aplikasi Kalender bawaan Android** atau **catatan**.
+<p align="center">
+  Chat ke WhatsApp seperti biasa — acaranya muncul sendiri di Kalender HP.
+</p>
 
-Kirim `besok jam 3 meeting sama tim` ke chat *Pesan ke Diri Sendiri*, bot bereaksi 📅,
-dan acaranya muncul di kalender HP lengkap dengan reminder.
+<p align="center">
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24-5FA04E?logo=node.js&logoColor=white">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white">
+  <img alt="Baileys" src="https://img.shields.io/badge/WhatsApp-Baileys-25D366?logo=whatsapp&logoColor=white">
+  <img alt="Gemini" src="https://img.shields.io/badge/AI-Gemini-4285F4?logo=googlegemini&logoColor=white">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white">
+</p>
+
+---
+
+## Apa ini
+
+Bot WhatsApp pribadi yang membaca pesanmu, memahami maksudnya dengan Gemini, lalu
+menuliskannya ke **aplikasi Kalender bawaan Android** atau menyimpannya sebagai catatan.
+
+Tidak ada form, tidak ada tombol. Kirim pesan ke chat *Pesan ke Diri Sendiri*:
+
+| Kamu kirim | Bot balas | Hasil |
+| --- | --- | --- |
+| `besok jam 3 meeting sama tim` | 📅 | Event besok 15:00 + reminder 30 menit sebelumnya |
+| `Senin depan bayar listrik` | 📅 | Event Senin 09:00 (jam default) |
+| `wifi rumah passwordnya 12345` | 📝 | Tersimpan sebagai catatan |
+| `haha iya bener` | 🤷 | Diabaikan |
+
+React emoji di pesanmu berfungsi sebagai status: ⏳ sedang diproses, 📅 event dibuat,
+📝 dicatat, 🤷 diabaikan, ❌ gagal (bot juga mengutip pesan dan menyebut alasannya).
+
+## Cara kerja
 
 ```
 Pesan WA (termasuk "Pesan ke Diri Sendiri")
@@ -27,63 +54,93 @@ CalDAV (Radicale)      data/notes.jsonl
 DAVx5 di HP  →  Kalender bawaan Android
 ```
 
-## Kenapa lewat CalDAV, bukan tulis kalender langsung
+Sisi server terhubung ke WhatsApp sebagai **perangkat tertaut** — sama seperti WhatsApp
+Web, jadi HP tidak perlu dipasangi aplikasi apa pun dan tidak perlu di-root.
+
+## Kenapa lewat CalDAV
 
 `CalendarContract` Android adalah content provider lokal — hanya bisa ditulis oleh proses
-yang berjalan **di dalam HP**. Bot di server tidak akan pernah bisa menyentuhnya langsung.
-CalDAV + DAVx5 menjembatani itu tanpa perlu memasang APK apa pun.
+yang berjalan **di dalam HP**. Bot yang hidup di server tidak akan pernah bisa
+menyentuhnya secara langsung. Radicale (server CalDAV) + DAVx5 menjembatani itu tanpa perlu
+memasang APK apa pun.
 
-Ini juga bukan Google Calendar. Datanya ada di server sendiri (Radicale).
+Ini juga bukan Google Calendar: datanya tinggal di servermu sendiri.
 
 ## Fitur
 
-- Baca pesan lewat sesi **perangkat tertaut** WhatsApp, termasuk chat ke diri sendiri
-- Ekstraksi bahasa natural Indonesia dengan Gemini (`besok`, `Senin depan`, `sore`, dll.)
-- React emoji sebagai status: ⏳ diproses, 📅 event dibuat, 📝 dicatat, 🤷 diabaikan, ❌ gagal
-- Reminder otomatis sebelum acara (`VALARM`, default 30 menit)
-- Filter whitelist nomor + prefix kata kunci opsional (`/catat`, `/ingatkan`)
-- Catatan disimpan sebagai JSONL, tanpa perlu database
+- **Chat ke diri sendiri didukung.** Tidak butuh nomor kedua.
+- **Bahasa natural Indonesia.** `besok`, `Senin depan`, `nanti sore`, campur bahasa gaul.
+- **Reminder otomatis** sebelum acara (`VALARM`, default 30 menit).
+- **Status lewat react emoji**, jadi terlihat langsung di chat tanpa balasan berisik.
+- **Filter berlapis**: whitelist nomor + prefix kata kunci opsional (`/catat`, `/ingatkan`).
+- **Turun kelas dengan aman**: kalau Gemini bilang "event" tapi waktunya tidak jelas,
+  otomatis disimpan sebagai catatan alih-alih membuat event ngawur.
+- **Tanpa database.** Catatan ditulis sebagai JSONL, deploy tetap sederhana.
+- **Self-hosted penuh.** Satu `docker compose up` untuk bot + server kalender.
 
-## Peringatan
+## Mulai
 
-Baileys adalah klien WhatsApp **tidak resmi**. Nomor bisa diblokir Meta. Project ini
-ditujukan untuk pencatatan pribadi — jangan dipakai untuk blast atau spam.
-
-## Jalankan
-
-Kode server ada di [server/](server), lengkap dengan Docker Compose (bot + Radicale).
-Panduan instalasi, konfigurasi `.env`, deploy, dan setup DAVx5 di HP: **[server/README.md](server/README.md)**.
-
-Ringkasnya:
+Butuh: server Linux dengan Docker, API key [Google AI Studio](https://aistudio.google.com/apikey),
+dan HP Android.
 
 ```bash
-cd server
-cp .env.example .env      # isi GEMINI_API_KEY, WHITELIST, CALDAV_*
+git clone https://github.com/yusuffadllh/CPChatRemind.git
+cd CPChatRemind/server
+
+cp .env.example .env
+$EDITOR .env                   # GEMINI_API_KEY, CALDAV_USERNAME, CALDAV_PASSWORD
+
+sudo apt install -y apache2-utils
+htpasswd -B -c radicale/config/users yusuf
+
+mkdir -p data radicale/data
+sudo chown -R 1000:1000 data radicale/data
+
 docker compose up -d --build
 docker compose logs -f bot     # scan QR dari HP
 ```
 
+Scan QR lewat WhatsApp → Setelan → **Perangkat tertaut** → Tautkan perangkat.
+
+Langkah lengkap — konfigurasi `.env`, reverse proxy HTTPS, membuat kalender di Radicale,
+dan setup DAVx5 di HP — ada di **[server/README.md](server/README.md)**.
+
+> [!WARNING]
+> Baileys adalah klien WhatsApp **tidak resmi**. Nomor bisa diblokir Meta. Project ini
+> ditujukan untuk pencatatan pribadi — jangan dipakai untuk blast atau spam.
+
+> [!CAUTION]
+> Radicale hanya di-bind ke `127.0.0.1`. Jangan ekspos port `5232` langsung ke internet:
+> Basic auth tanpa TLS mengirim password dalam bentuk polos. Taruh di belakang reverse
+> proxy HTTPS.
+
 ## Stack
 
 | Bagian | Teknologi |
-|---|---|
-| Runtime | Node.js 24 + TypeScript (ESM) |
-| WhatsApp | [Baileys](https://github.com/WhiskeySockets/Baileys) 6.7.x |
-| LLM | Google Gemini via `@google/genai` |
+| --- | --- |
+| Runtime | Node.js 24 + TypeScript (ESM, strict) |
+| WhatsApp | [Baileys](https://github.com/WhiskeySockets/Baileys) |
+| LLM | Google Gemini via [`@google/genai`](https://www.npmjs.com/package/@google/genai) |
 | Kalender | [Radicale](https://radicale.org/) (CalDAV) + `tsdav` + `ical-generator` |
 | Sync ke HP | [DAVx5](https://www.davx5.com/) → Kalender bawaan Android |
-| Lain-lain | zod, luxon, pino |
+| Pendukung | zod (validasi env), luxon (zona waktu), pino (log) |
+| Deploy | Docker Compose |
 
 ## Struktur
 
 ```
-server/           bot Node.js + TypeScript (yang dipakai)
-  src/            kode sumber
-  radicale/       konfigurasi Radicale
-app/              arsip: app Android Kotlin + Compose (tidak dipakai lagi)
-HANDOVER.md       catatan konteks & keputusan desain
+server/              bot Node.js + TypeScript  ← yang dipakai
+  src/               kode sumber
+  radicale/config/   konfigurasi Radicale
+  docker-compose.yml bot + Radicale
+app/                 arsip: app Android Kotlin + Compose (tidak dipakai lagi)
+HANDOVER.md          catatan konteks & keputusan desain
 ```
 
 Folder `app/` adalah pendekatan awal berbasis `NotificationListenerService`. Ditinggalkan
-karena chat ke diri sendiri tidak memunculkan notifikasi dan notifikasi WhatsApp tidak
-mengekspos aksi react. Latar belakangnya ada di [HANDOVER.md](HANDOVER.md).
+karena dua hal: chat ke diri sendiri tidak memunculkan notifikasi, dan notifikasi WhatsApp
+tidak mengekspos aksi react. Latar belakang lengkapnya ada di [HANDOVER.md](HANDOVER.md).
+
+## Lisensi
+
+Belum ditentukan. Project pribadi.

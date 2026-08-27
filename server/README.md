@@ -1,78 +1,87 @@
-# wa-reminder server
+# CPChatRemind — server
 
-Bot WhatsApp pribadi: pesan masuk → Gemini ekstrak → event di CalDAV (Radicale) atau catatan JSONL.
-Di HP, DAVx5 men-sync Radicale sehingga event muncul di **aplikasi Kalender bawaan Android**.
+Bot Baileys yang mengubah pesan WhatsApp menjadi event CalDAV atau catatan.
+Untuk gambaran umum project, lihat [README utama](../README.md).
 
 ```
-Pesan WA (termasuk "Pesan ke Diri Sendiri")
-  → Baileys (perangkat tertaut)  → react ⏳
-  → filter whitelist / self-chat / kata kunci
-  → Gemini  → event | note | ignore
-  → CalDAV (event) atau notes.jsonl (catatan)
-  → react 📅 / 📝 / 🤷 / ❌
+Pesan WA → Baileys → react ⏳ → filter → Gemini → CalDAV / notes.jsonl → react 📅 📝 🤷 ❌
 ```
 
-## Peringatan
+## Prasyarat
 
-Baileys adalah klien tidak resmi. Nomor bisa diblokir WhatsApp. Pakai hanya untuk
-pencatatan pribadi, jangan untuk blast/spam.
-
-## Target server
-
-Sudah diverifikasi cocok: Debian 13 (trixie), x86_64, Node v24.19.0, Docker 26.1.5,
-Docker Compose 2.26.1. Deploy pakai Docker.
-
-## Jalan lokal (dev)
-
-```bash
-cd server
-cp .env.example .env      # isi GEMINI_API_KEY, WHITELIST, CALDAV_*
-npm install
-npm run typecheck
-npm run dev               # QR muncul di terminal
-```
-
-Scan QR: WhatsApp → Setelan → **Perangkat tertaut** → Tautkan perangkat.
-Sesi tersimpan di `data/auth/`. Jangan commit folder ini.
+| Kebutuhan | Keterangan |
+| --- | --- |
+| Server Linux | Sudah diverifikasi di Debian 13 (trixie), x86_64 |
+| Docker | 26.x + Compose 2.x (jalur deploy yang direkomendasikan) |
+| Node.js | ≥ 22 — hanya kalau mau jalan tanpa Docker |
+| API key Gemini | Gratis di [Google AI Studio](https://aistudio.google.com/apikey) |
+| HP Android | Untuk DAVx5 + Kalender bawaan |
 
 ## Deploy dengan Docker
 
+### 1. Ambil kode
+
 ```bash
-# 1. Salin project ke server
 git clone https://github.com/yusuffadllh/CPChatRemind.git
 cd CPChatRemind/server
-
-# 2. Konfigurasi
-cp .env.example .env
-$EDITOR .env          # GEMINI_API_KEY, WHITELIST, CALDAV_USERNAME, CALDAV_PASSWORD, CALDAV_CALENDAR
-
-# 3. User Radicale (htpasswd dari paket apache2-utils)
-sudo apt install -y apache2-utils
-htpasswd -B -c radicale/config/users yusuf
-
-# 4. Folder data; uid 1000 = user `node` di container bot & `radicale` di image Radicale
-mkdir -p data radicale/data
-sudo chown -R 1000:1000 data radicale/data
-
-# 5. Jalankan
-docker compose up -d --build
-docker compose logs -f bot    # QR muncul di sini, scan dari HP
 ```
 
-Scan QR lewat WhatsApp → Setelan → **Perangkat tertaut** → Tautkan perangkat.
+### 2. Konfigurasi
 
-Setelah itu buat kalender di web UI Radicale (`http://127.0.0.1:5232/`, atau lewat SSH
-tunnel `ssh -L 5232:127.0.0.1:5232 user@server`), login pakai user tadi, lalu samakan nama
-kalendernya dengan `CALDAV_CALENDAR` di `.env` dan `docker compose restart bot`.
+```bash
+cp .env.example .env
+$EDITOR .env
+```
 
-`CALDAV_URL` tidak perlu diisi di `.env` — compose meng-override-nya ke
-`http://radicale:5232/` (jaringan internal Docker, tidak lewat internet).
+Minimal yang wajib diisi: `GEMINI_API_KEY`, `CALDAV_USERNAME`, `CALDAV_PASSWORD`.
+`CALDAV_URL` tidak perlu disentuh — Compose meng-override-nya ke `http://radicale:5232/`
+melalui jaringan internal Docker.
 
-Radicale hanya di-bind ke `127.0.0.1`. Untuk diakses HP dari luar, taruh di belakang
-reverse proxy dengan HTTPS (Caddy/nginx + Let's Encrypt). **Jangan** ekspos port 5232
-langsung ke internet — Basic auth tanpa TLS mengirim password polos.
+### 3. Buat user Radicale
 
-Contoh Caddyfile:
+```bash
+sudo apt install -y apache2-utils
+htpasswd -B -c radicale/config/users yusuf
+```
+
+Password yang kamu masukkan di sini harus sama dengan `CALDAV_PASSWORD` di `.env`.
+
+### 4. Siapkan folder data
+
+```bash
+mkdir -p data radicale/data
+sudo chown -R 1000:1000 data radicale/data
+```
+
+uid 1000 adalah user `node` di container bot dan `radicale` di image Radicale. Tanpa
+`chown`, container tidak bisa menulis ke bind mount.
+
+### 5. Jalankan dan tautkan WhatsApp
+
+```bash
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+QR muncul di log. Scan lewat WhatsApp → Setelan → **Perangkat tertaut** → Tautkan
+perangkat. Sesi tersimpan di `data/auth/`, jadi restart tidak perlu scan ulang.
+
+### 6. Buat kalender di Radicale
+
+Port 5232 sengaja hanya di-bind ke `127.0.0.1`, jadi akses dari laptop lewat tunnel:
+
+```bash
+ssh -L 5232:127.0.0.1:5232 user@server
+```
+
+Buka <http://127.0.0.1:5232/>, login dengan user tadi, buat kalender baru. Kalau namanya
+kamu isikan ke `CALDAV_CALENDAR`, jalankan `docker compose restart bot`. Kalau dikosongkan,
+bot memakai kalender pertama yang ditemukan.
+
+## Reverse proxy HTTPS
+
+DAVx5 di HP butuh Radicale dapat diakses dari internet. Basic auth tanpa TLS mengirim
+password dalam bentuk polos, jadi **wajib** lewat HTTPS. Contoh Caddyfile:
 
 ```
 caldav.domain-kamu {
@@ -80,42 +89,119 @@ caldav.domain-kamu {
 }
 ```
 
+Jangan ganti binding port menjadi `0.0.0.0:5232`.
+
 ## Setup HP (DAVx5)
 
-1. Pasang **DAVx5** dari F-Droid (gratis) atau Play Store (berbayar).
+1. Pasang **DAVx5** — gratis di [F-Droid](https://f-droid.org/packages/at.bitfire.davdroid/),
+   berbayar di Play Store (sama saja, versi Play Store itu bentuk donasi).
 2. Tambah akun → *Login dengan URL dan nama pengguna*.
-3. URL = `https://caldav.domain-kamu/`, username + password Radicale.
+3. URL `https://caldav.domain-kamu/`, lalu username + password Radicale.
 4. Centang kalender yang mau di-sync.
-5. Atur interval sync (default 15 menit; bisa dipercepat di setelan akun).
+5. Atur interval sync di setelan akun (default 15 menit).
 
-Event akan muncul di Kalender bawaan Android beserta remindernya.
+Event beserta remindernya akan muncul di aplikasi Kalender bawaan Android.
+
+> Sync DAVx5 memakai polling, jadi ada jeda antara bot menulis event dan event terlihat di
+> HP. Percepat intervalnya kalau jeda 15 menit terasa lama.
+
+## Jalan lokal tanpa Docker
+
+```bash
+cd server
+cp .env.example .env
+npm install
+npm run typecheck
+npm run dev            # tsx watch, QR muncul di terminal
+```
+
+Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menunjuk ke sana.
+
+| Script | Fungsi |
+| --- | --- |
+| `npm run dev` | Jalan dengan auto-reload |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run build` | Compile ke `dist/` |
+| `npm start` | Jalankan hasil build |
 
 ## Konfigurasi (.env)
 
-| Key | Arti |
-| --- | --- |
-| `GEMINI_API_KEY` | API key Google AI Studio |
-| `GEMINI_MODEL` | mis. `gemini-2.5-flash` |
-| `WHITELIST` | nomor yang diizinkan, dipisah koma; kosong = tolak semua non-self |
-| `ALLOW_SELF_CHAT` | `true` agar "Pesan ke Diri Sendiri" diproses |
-| `REQUIRE_KEYWORD` | `true` = hanya proses pesan berawalan `KEYWORDS` |
-| `KEYWORDS` | mis. `/catat,/ingatkan,/note` |
-| `TIMEZONE` | `Asia/Jakarta` |
-| `REMINDER_MINUTES_BEFORE` | menit alarm sebelum event; `0` = tanpa alarm |
-| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | koneksi Radicale |
-| `CALDAV_CALENDAR` | nama kalender target; kosong = kalender pertama |
-| `DATA_DIR` | lokasi `auth/` dan `notes.jsonl` |
-| `LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+**Gemini**
 
-## Struktur
+| Key | Default | Arti |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | — | Wajib. API key Google AI Studio |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | Model yang dipakai |
+
+**Siapa yang boleh menyuruh bot**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `ALLOW_SELF_CHAT` | `true` | Proses pesan dari chat ke nomor sendiri |
+| `WHITELIST` | kosong | Nomor lain yang diizinkan, dipisah koma. Format bebas (`+62…`, `08…`) — dicocokkan lewat 9 digit terakhir. Kosong = hanya self-chat |
+| `REQUIRE_KEYWORD` | `false` | `true` = hanya proses pesan berawalan `KEYWORDS` |
+| `KEYWORDS` | `/catat,/ingatkan,/note` | Prefix yang diterima; prefix otomatis dibuang dari judul |
+
+**Waktu**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `TIMEZONE` | `Asia/Jakarta` | Dipakai untuk resolusi "besok", "sore", dll. |
+| `REMINDER_MINUTES_BEFORE` | `30` | Menit alarm sebelum event; `0` = tanpa alarm |
+
+**CalDAV**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `CALDAV_URL` | `http://localhost:5232/` | Di-override oleh Compose |
+| `CALDAV_USERNAME` / `CALDAV_PASSWORD` | — | Kredensial Radicale |
+| `CALDAV_CALENDAR` | kosong | Nama kalender tujuan; kosong = kalender pertama |
+
+**Lain-lain**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `DATA_DIR` | `./data` | Lokasi `auth/` dan `notes.jsonl` |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+
+## Struktur kode
 
 | File | Isi |
 | --- | --- |
-| [src/index.ts](src/index.ts) | entrypoint, verifikasi CalDAV, start Baileys, shutdown |
-| [src/whatsapp.ts](src/whatsapp.ts) | koneksi Baileys, QR, reconnect, `react()`, `reply()` |
-| [src/handler.ts](src/handler.ts) | filter, alur react → ekstrak → simpan |
-| [src/gemini.ts](src/gemini.ts) | prompt + schema ekstraksi terstruktur |
-| [src/caldav.ts](src/caldav.ts) | buat ICS + PUT ke Radicale |
-| [src/notes.ts](src/notes.ts) | catatan JSONL |
-| [src/config.ts](src/config.ts) | validasi env (zod), pencocokan whitelist 9 digit akhir |
-| [src/logger.ts](src/logger.ts) | pino |
+| [src/index.ts](src/index.ts) | Entrypoint: verifikasi CalDAV, start Baileys, shutdown SIGINT/SIGTERM |
+| [src/whatsapp.ts](src/whatsapp.ts) | Koneksi Baileys, QR, reconnect, deteksi self-chat, `react()`, `reply()` |
+| [src/handler.ts](src/handler.ts) | Alur: filter → react ⏳ → ekstrak → simpan → react hasil |
+| [src/gemini.ts](src/gemini.ts) | Prompt Bahasa Indonesia + response schema terstruktur |
+| [src/caldav.ts](src/caldav.ts) | Bangun ICS + `PUT` ke Radicale, cache kalender |
+| [src/notes.ts](src/notes.ts) | Catatan JSONL append-only |
+| [src/config.ts](src/config.ts) | Validasi env dengan zod, pencocokan whitelist 9 digit akhir |
+| [src/logger.ts](src/logger.ts) | pino + pino-pretty |
+
+## Data di disk
+
+```
+data/
+  auth/            sesi WhatsApp — RAHASIA, setara akses penuh ke akunmu
+  notes.jsonl      catatan, satu JSON per baris
+radicale/data/     penyimpanan kalender Radicale
+radicale/config/
+  config           konfigurasi Radicale
+  users            hash password (bcrypt) — tidak di-commit
+```
+
+`data/`, `radicale/data/`, `radicale/config/users`, dan `.env` semuanya sudah masuk
+`.gitignore`.
+
+## Troubleshooting
+
+| Gejala | Penyebab & solusi |
+| --- | --- |
+| Bot berhenti dengan pesan sesi dicabut | Perangkat tertaut dihapus dari HP. Hapus `data/auth/` lalu scan QR lagi |
+| `Kalender "X" tidak ditemukan` | Nama `CALDAV_CALENDAR` tidak sama dengan di Radicale. Log menampilkan daftar yang tersedia |
+| Container gagal tulis ke `data/` | Bind mount belum di-`chown 1000:1000` |
+| Pesan tidak diproses sama sekali | Cek `ALLOW_SELF_CHAT` / `WHITELIST`, dan kalau `REQUIRE_KEYWORD=true` pastikan pesan berawalan salah satu `KEYWORDS` |
+| Event dibuat tapi tidak muncul di HP | Sync DAVx5 masih menunggu polling; tarik-untuk-refresh atau percepat intervalnya |
+| Waktu event ngawur | `TIMEZONE` salah, atau pesannya memang ambigu — cek `LOG_LEVEL=debug` untuk melihat hasil ekstraksi |
+
+Log terstruktur: `docker compose logs -f bot`. Set `LOG_LEVEL=debug` untuk melihat JSON
+hasil ekstraksi Gemini per pesan.
