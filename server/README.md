@@ -91,10 +91,61 @@ perangkat. Sesi tersimpan di `data/auth/`, jadi restart tidak perlu scan ulang.
 
 Log `WhatsApp tersambung` menandakan bot siap.
 
-## Reverse proxy HTTPS
+## Akses dari HP: pilih satu
 
-DAVx5 di HP butuh Radicale dapat diakses dari internet. Basic auth tanpa TLS mengirim
-password dalam bentuk polos, jadi **wajib** lewat HTTPS. Contoh Caddyfile:
+Radicale hanya di-bind ke `127.0.0.1:5232`. DAVx5 di HP perlu jalan masuk yang ber-HTTPS —
+Basic auth tanpa TLS mengirim password dalam bentuk polos. Jangan pernah mengganti binding
+menjadi `0.0.0.0:5232`.
+
+### Opsi 1 — Tailscale Serve (paling praktis)
+
+Kalau server sudah di dalam tailnet, satu perintah sudah cukup:
+
+```bash
+sudo tailscale serve --bg --https=443 127.0.0.1:5232
+tailscale serve status
+```
+
+Sertifikat TLS diterbitkan otomatis dan URL-nya jadi
+`https://<nama-server>.<tailnet>.ts.net/`. Tidak perlu domain, tidak perlu buka port di
+firewall, dan `--bg` membuatnya bertahan setelah reboot.
+
+Syaratnya HP juga terpasang Tailscale dan login ke tailnet yang sama. Karena tidak melewati
+internet publik, ini sekaligus paling aman.
+
+Kalau port 443 di tailnet sudah dipakai layanan lain (File Browser, Syncthing), pakai port
+lain lalu sertakan port itu di URL DAVx5:
+
+```bash
+sudo tailscale serve --bg --https=8443 127.0.0.1:5232
+```
+
+Mematikan: ulangi perintahnya dengan menambahkan `off` di akhir.
+
+### Opsi 2 — Cloudflare Tunnel
+
+Kalau HP tidak selalu di tailnet dan kamu ingin akses dari internet:
+
+```bash
+cloudflared tunnel create caldav
+cloudflared tunnel route dns caldav caldav.domain-kamu
+```
+
+Tambahkan ke `~/.cloudflared/config.yml`:
+
+```yaml
+ingress:
+  - hostname: caldav.domain-kamu
+    service: http://127.0.0.1:5232
+  - service: http_status:404
+```
+
+Tidak perlu membuka port apa pun di firewall. Karena endpoint-nya publik, aktifkan
+Cloudflare Access kalau ingin lapisan autentikasi tambahan di atas Basic auth Radicale.
+
+### Opsi 3 — Caddy
+
+Butuh domain yang mengarah ke IP server dan port 80 + 443 terbuka:
 
 ```
 caldav.domain-kamu {
@@ -102,16 +153,17 @@ caldav.domain-kamu {
 }
 ```
 
-Jangan ganti binding port menjadi `0.0.0.0:5232`.
-
 ## Setup HP (DAVx5)
 
 1. Pasang **DAVx5** — gratis di [F-Droid](https://f-droid.org/packages/at.bitfire.davdroid/),
    berbayar di Play Store (sama saja, versi Play Store itu bentuk donasi).
 2. Tambah akun → *Login dengan URL dan nama pengguna*.
-3. URL `https://caldav.domain-kamu/`, lalu username + password Radicale.
-4. Centang kalender yang mau di-sync.
-5. Atur interval sync di setelan akun (default 15 menit).
+3. URL sesuai opsi yang kamu pilih di atas:
+   - Tailscale Serve → `https://<nama-server>.<tailnet>.ts.net/`
+   - Cloudflare Tunnel / Caddy → `https://caldav.domain-kamu/`
+4. Username + password Radicale, lalu **Login**.
+5. Centang kalender yang mau di-sync.
+6. Atur interval sync di setelan akun (default 15 menit).
 
 Event beserta remindernya akan muncul di aplikasi Kalender bawaan Android.
 

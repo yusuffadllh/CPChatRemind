@@ -117,8 +117,9 @@ dan setup DAVx5 di HP — ada di **[server/README.md](server/README.md)**.
 
 > [!CAUTION]
 > Radicale hanya di-bind ke `127.0.0.1`. Jangan ekspos port `5232` langsung ke internet:
-> Basic auth tanpa TLS mengirim password dalam bentuk polos. Taruh di belakang reverse
-> proxy HTTPS.
+> Basic auth tanpa TLS mengirim password dalam bentuk polos. Untuk akses dari HP, pakai
+> Tailscale Serve, Cloudflare Tunnel, atau reverse proxy HTTPS — lihat
+> [server/README.md](server/README.md).
 
 ## Stack
 
@@ -129,6 +130,7 @@ dan setup DAVx5 di HP — ada di **[server/README.md](server/README.md)**.
 | LLM | Google Gemini via [`@google/genai`](https://www.npmjs.com/package/@google/genai) |
 | Kalender | [Radicale](https://radicale.org/) (CalDAV) + `tsdav` + `ical-generator` |
 | Sync ke HP | [DAVx5](https://www.davx5.com/) → Kalender bawaan Android |
+| Akses HP | Tailscale Serve / Cloudflare Tunnel / reverse proxy HTTPS |
 | Pendukung | zod (validasi env), luxon (zona waktu), pino (log) |
 | Deploy | Docker Compose |
 

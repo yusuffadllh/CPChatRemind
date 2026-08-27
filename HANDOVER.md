@@ -115,6 +115,11 @@ Hostname `cupserver`. Debian 13 (trixie) 13.6, arsitektur `x86_64`, Node `v24.19
 Docker `26.1.5+dfsg1`, Docker Compose `2.26.1`. Semua syarat terpenuhi — **deploy pakai
 Docker Compose**, tidak perlu systemd.
 
+Layanan yang sudah jalan di server: **Tailscale**, File Browser, Syncthing, Cloudflare
+(cloudflared). Jalur akses HP yang dipilih: **Tailscale Serve** — tidak butuh domain, tidak
+buka port, sertifikat TLS otomatis. Perhatikan port 443 di tailnet mungkin sudah dipakai
+File Browser/Syncthing; kalau bentrok pakai `--https=8443`.
+
 Catatan penyesuaian: image Radicale dipin ke `3.7.6.0` (tag terbaru), base image bot
 `node:24-alpine` menyamai Node server, container bot jalan sebagai user `node` (uid 1000),
 sehingga folder `data/` dan `radicale/data/` di host harus `chown 1000:1000`.
@@ -129,10 +134,10 @@ sehingga folder `data/` dan `radicale/data/` di host harus `chown 1000:1000`.
 - [ ] Isi `.env` di server: `GEMINI_API_KEY`, `WHITELIST`, `CALDAV_USERNAME/PASSWORD/CALENDAR`
 - [ ] `sudo apt install apache2-utils` lalu `htpasswd -B -c radicale/config/users <nama>`
 - [ ] `mkdir -p data radicale/data && sudo chown -R 1000:1000 data radicale/data`
-- [ ] `docker compose up -d --build`, scan QR dari `docker compose logs -f bot`
-- [ ] Buat kalender di web UI Radicale (SSH tunnel ke `127.0.0.1:5232`), samakan dengan `CALDAV_CALENDAR`, lalu `docker compose restart bot`
-- [ ] Reverse proxy + HTTPS (Caddy) sebelum HP akses dari luar jaringan
-- [ ] Pasang DAVx5 di HP (F-Droid, gratis), tambah akun via URL
+- [ ] `docker compose up -d radicale`, buat kalender di web UI (SSH tunnel ke `127.0.0.1:5232`)
+- [ ] `docker compose up -d --build bot`, scan QR dari `docker compose logs -f bot`
+- [ ] Ekspos Radicale ke HP: `sudo tailscale serve --bg --https=443 127.0.0.1:5232` (server sudah punya Tailscale; alternatif Cloudflare Tunnel yang juga sudah terpasang)
+- [ ] Pasang DAVx5 di HP (F-Droid, gratis), login pakai URL `*.ts.net`
 - [ ] Uji end-to-end: kirim "besok jam 3 meeting" ke diri sendiri
 - [ ] Putuskan nasib folder `app/` (lihat bagian 5)
 
