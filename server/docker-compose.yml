@@ -1,0 +1,43 @@
+services:
+  radicale:
+    image: tomsquest/docker-radicale:3.7.6.0
+    container_name: wa-reminder-radicale
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - KILL
+    ports:
+      # Jangan buka ke internet tanpa HTTPS. Taruh di belakang reverse proxy.
+      - '127.0.0.1:5232:5232'
+    volumes:
+      - ./radicale/data:/data
+      - ./radicale/config:/config:ro
+    healthcheck:
+      test: ['CMD', 'curl', '-fsSL', 'http://127.0.0.1:5232/']
+      interval: 30s
+      retries: 3
+
+  bot:
+    build: .
+    container_name: wa-reminder-bot
+    restart: unless-stopped
+    init: true
+    depends_on:
+      radicale:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      CALDAV_URL: http://radicale:5232/
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    # Perlu TTY supaya QR code Baileys terbaca lewat `docker compose logs`.
+    tty: true

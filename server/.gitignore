@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+radicale/data/
+radicale/config/users
+.env
+*.log
