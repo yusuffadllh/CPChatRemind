@@ -39,8 +39,8 @@ Sesi tersimpan di `data/auth/`. Jangan commit folder ini.
 
 ```bash
 # 1. Salin project ke server
-git clone <repo> wa-reminder && cd wa-reminder/server
-# atau: rsync -av --exclude node_modules --exclude data ./server/ user@server:~/wa-reminder/server/
+git clone https://github.com/yusuffadllh/CPChatRemind.git
+cd CPChatRemind/server
 
 # 2. Konfigurasi
 cp .env.example .env

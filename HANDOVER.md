@@ -3,8 +3,9 @@
 > Dokumen ini dibuat supaya konteks tidak hilang kalau chat ke-reset saat open folder.
 > Kalau kamu (AI/asisten baru) membaca ini: baca seluruh file dulu sebelum menulis kode.
 
-Terakhir diperbarui: 2026-08-25
+Terakhir diperbarui: 2026-08-27
 Lokasi project: `E:\Project\wa-reminder`
+Repo: <https://github.com/yusuffadllh/CPChatRemind> (branch `main`)
 
 ---
 
@@ -123,7 +124,8 @@ sehingga folder `data/` dan `radicale/data/` di host harus `chown 1000:1000`.
 ## 4. TODO berikutnya
 
 - [x] Cek kesiapan server user — Debian 13 / x86_64 / Node 24 / Docker 26 + Compose 2.26
-- [ ] Salin folder `server/` ke server (git clone atau rsync)
+- [x] Push ke GitHub — `yusuffadllh/CPChatRemind`, branch `main`
+- [ ] `git clone https://github.com/yusuffadllh/CPChatRemind.git` di server, lalu `cd CPChatRemind/server`
 - [ ] Isi `.env` di server: `GEMINI_API_KEY`, `WHITELIST`, `CALDAV_USERNAME/PASSWORD/CALENDAR`
 - [ ] `sudo apt install apache2-utils` lalu `htpasswd -B -c radicale/config/users <nama>`
 - [ ] `mkdir -p data radicale/data && sudo chown -R 1000:1000 data radicale/data`
