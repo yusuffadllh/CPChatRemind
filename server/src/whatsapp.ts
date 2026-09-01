@@ -9,7 +9,7 @@ import makeWASocket, {
 } from 'baileys';
 import { join } from 'node:path';
 import qrcode from 'qrcode-terminal';
-import { config } from './config.js';
+import { config, digitsOnly } from './config.js';
 import { logger } from './logger.js';
 
 export interface IncomingMessage {
@@ -26,7 +26,11 @@ export type MessageHandler = (message: IncomingMessage) => Promise<void>;
 
 const RECONNECT_DELAY_MS = 3000;
 
-const waLogger = logger.child({ module: 'baileys' });
+/**
+ * Baileys sangat berisik di level info (history sync, app-state, dsb).
+ * Dipisah ke level sendiri supaya LOG_LEVEL=debug tetap enak dibaca.
+ */
+const waLogger = logger.child({ module: 'baileys' }, { level: config.BAILEYS_LOG_LEVEL });
 
 /** Socket bisa diganti saat reconnect, jadi handler harus selalu ambil yang terbaru. */
 let current: WASocket | null = null;
@@ -51,6 +55,23 @@ function extractText(message: WAMessage): string | null {
 
   const trimmed = text?.trim();
   return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Cek apakah sebuah JID adalah nomor kita sendiri.
+ * WhatsApp bisa memakai JID biasa (@s.whatsapp.net) maupun LID (@lid),
+ * jadi bandingkan digitnya saja supaya "Message Yourself" tetap terdeteksi.
+ */
+function isOwnJid(sock: WASocket, normalizedJid: string): boolean {
+  const candidates = [sock.user?.id, sock.user?.lid]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map((value) => digitsOnly(jidNormalizedUser(value).split('@')[0] ?? ''))
+    .filter((value) => value.length >= 8);
+
+  const target = digitsOnly(normalizedJid.split('@')[0] ?? '');
+  if (target.length < 8) return false;
+
+  return candidates.some((candidate) => candidate.slice(-9) === target.slice(-9));
 }
 
 export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket> {
@@ -78,7 +99,7 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
     }
 
     if (connection === 'open') {
-      logger.info({ user: sock.user?.id }, 'WhatsApp tersambung');
+      logger.info({ user: sock.user?.id, lid: sock.user?.lid }, 'WhatsApp tersambung');
     }
 
     if (connection === 'close') {
@@ -101,9 +122,12 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return;
-
-    const ownJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
+    // 'notify' = pesan baru dari orang lain.
+    // 'append' = pesan yang kita kirim sendiri dari HP; ini yang dipakai self-chat.
+    if (type !== 'notify' && type !== 'append') {
+      logger.debug({ type, count: messages.length }, 'Upsert dilewati');
+      return;
+    }
 
     for (const message of messages) {
       const jid = message.key.remoteJid;
@@ -115,15 +139,20 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
       }
 
       const normalizedJid = jidNormalizedUser(jid);
-      const isSelfChat = ownJid !== null && normalizedJid === ownJid;
+      const isSelfChat = isOwnJid(sock, normalizedJid);
+      const text = extractText(message);
+
+      logger.debug(
+        { type, jid, normalizedJid, fromMe: message.key.fromMe, isSelfChat, text },
+        'Pesan masuk',
+      );
 
       // Pesan keluar hanya relevan kalau ini chat ke diri sendiri.
       if (message.key.fromMe && !isSelfChat) continue;
 
-      const text = extractText(message);
       if (!text) continue;
 
-      const senderPhone = normalizedJid.split('@')[0] ?? '';
+      const senderPhone = digitsOnly(normalizedJid.split('@')[0] ?? '');
 
       try {
         await onMessage({ jid, senderPhone, text, isSelfChat, raw: message });

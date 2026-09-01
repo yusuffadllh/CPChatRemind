@@ -228,6 +228,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | --- | --- | --- |
 | `DATA_DIR` | `./data` | Lokasi `auth/` dan `notes.jsonl` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `BAILEYS_LOG_LEVEL` | `warn` | Log internal Baileys, dipisah karena sangat berisik |
 
 ## Struktur kode
 

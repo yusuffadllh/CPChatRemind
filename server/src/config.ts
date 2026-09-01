@@ -34,6 +34,8 @@ const schema = z.object({
 
   DATA_DIR: z.string().default('./data'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+  /** Baileys sangat berisik; dipisah supaya LOG_LEVEL=debug tetap terbaca. */
+  BAILEYS_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('warn'),
 });
 
 const parsed = schema.safeParse(process.env);

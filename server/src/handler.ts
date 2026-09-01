@@ -44,10 +44,22 @@ function stripKeyword(text: string): string | null {
 
 export function createHandler(getSocket: () => WASocket) {
   return async function handle(message: IncomingMessage): Promise<void> {
-    if (!isAllowed(message)) return;
+    if (!isAllowed(message)) {
+      logger.debug(
+        { from: message.senderPhone, isSelfChat: message.isSelfChat },
+        'Pengirim tidak diizinkan (cek ALLOW_SELF_CHAT / WHITELIST)',
+      );
+      return;
+    }
 
     const payload = stripKeyword(message.text);
-    if (!payload) return;
+    if (!payload) {
+      logger.debug(
+        { text: message.text, keywords: config.KEYWORDS },
+        'Pesan tidak lolos filter kata kunci',
+      );
+      return;
+    }
 
     const messageId = message.raw.key.id;
     if (!messageId || inFlight.has(messageId)) return;
