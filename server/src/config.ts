@@ -13,7 +13,7 @@ const csv = (value: string): string[] =>
 
 const schema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY wajib diisi'),
-  GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
+  GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
 
   WHITELIST: z.string().default('').transform(csv),
   ALLOW_SELF_CHAT: z.stringbool().default(true),

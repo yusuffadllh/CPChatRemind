@@ -196,7 +196,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | Key | Default | Arti |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | Wajib. API key Google AI Studio |
-| `GEMINI_MODEL` | `gemini-2.0-flash` | Model yang dipakai |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | Model yang dipakai. `gemini-2.0-flash` dijadwalkan mati 1 Juni 2026 |
 
 **Siapa yang boleh menyuruh bot**
 
