@@ -58,20 +58,49 @@ function extractText(message: WAMessage): string | null {
 }
 
 /**
- * Cek apakah sebuah JID adalah nomor kita sendiri.
- * WhatsApp bisa memakai JID biasa (@s.whatsapp.net) maupun LID (@lid),
- * jadi bandingkan digitnya saja supaya "Message Yourself" tetap terdeteksi.
+ * Ambil nomor telepon asli pengirim.
+ *
+ * WhatsApp kini sering memakai LID (`123@lid`) yang angkanya sama sekali beda
+ * dari nomor telepon. Baileys menyertakan nomor aslinya di `key.senderPn` /
+ * `key.participantPn`, jadi itu yang dipakai lebih dulu.
  */
-function isOwnJid(sock: WASocket, normalizedJid: string): boolean {
-  const candidates = [sock.user?.id, sock.user?.lid]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0)
-    .map((value) => digitsOnly(jidNormalizedUser(value).split('@')[0] ?? ''))
-    .filter((value) => value.length >= 8);
+function resolveSenderPhone(message: WAMessage): string {
+  const key = message.key;
+  const candidate = key.senderPn ?? key.participantPn ?? key.participant ?? key.remoteJid ?? '';
+  const digits = digitsOnly(jidNormalizedUser(candidate).split('@')[0] ?? '');
+  if (digits.length >= 8) return digits;
+  return digitsOnly(candidate.split('@')[0] ?? '');
+}
 
-  const target = digitsOnly(normalizedJid.split('@')[0] ?? '');
-  if (target.length < 8) return false;
+/** Bandingkan dua nomor lewat 9 digit terakhir, biar +62.. dan 08.. dianggap sama. */
+function sameNumber(a: string, b: string): boolean {
+  const left = digitsOnly(a);
+  const right = digitsOnly(b);
+  if (left.length < 8 || right.length < 8) return false;
+  return left.slice(-9) === right.slice(-9);
+}
 
-  return candidates.some((candidate) => candidate.slice(-9) === target.slice(-9));
+/**
+ * Cek apakah chat ini adalah "Message Yourself".
+ * Dicocokkan lewat nomor telepon maupun LID, karena WhatsApp bisa memakai
+ * salah satu tergantung versi klien.
+ */
+function isSelfChatJid(sock: WASocket, message: WAMessage): boolean {
+  const ownPhone = digitsOnly(jidNormalizedUser(sock.user?.id ?? '').split('@')[0] ?? '');
+  const ownLid = digitsOnly(jidNormalizedUser(sock.user?.lid ?? '').split('@')[0] ?? '');
+
+  const jid = message.key.remoteJid ?? '';
+  const jidDigits = digitsOnly(jidNormalizedUser(jid).split('@')[0] ?? '');
+
+  if (jid.endsWith('@lid')) {
+    if (ownLid && sameNumber(jidDigits, ownLid)) return true;
+    // remoteJid berupa LID: nomor aslinya ada di senderPn.
+    const senderPn = message.key.senderPn;
+    if (senderPn && ownPhone && sameNumber(senderPn, ownPhone)) return true;
+    return false;
+  }
+
+  return Boolean(ownPhone) && sameNumber(jidDigits, ownPhone);
 }
 
 export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket> {
@@ -138,12 +167,20 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
         continue;
       }
 
-      const normalizedJid = jidNormalizedUser(jid);
-      const isSelfChat = isOwnJid(sock, normalizedJid);
+      const isSelfChat = isSelfChatJid(sock, message);
       const text = extractText(message);
+      const senderPhone = resolveSenderPhone(message);
 
       logger.debug(
-        { type, jid, normalizedJid, fromMe: message.key.fromMe, isSelfChat, text },
+        {
+          type,
+          jid,
+          senderPn: message.key.senderPn,
+          senderPhone,
+          fromMe: message.key.fromMe,
+          isSelfChat,
+          text,
+        },
         'Pesan masuk',
       );
 
@@ -151,8 +188,6 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
       if (message.key.fromMe && !isSelfChat) continue;
 
       if (!text) continue;
-
-      const senderPhone = digitsOnly(normalizedJid.split('@')[0] ?? '');
 
       try {
         await onMessage({ jid, senderPhone, text, isSelfChat, raw: message });
