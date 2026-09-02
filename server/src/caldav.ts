@@ -80,8 +80,11 @@ export async function createEvent(input: EventInput): Promise<string> {
   const calendar = ical({ prodId: '//wa-reminder//id', method: ICalCalendarMethod.PUBLISH });
   const event = calendar.createEvent({
     id: uid,
-    start: input.start.toJSDate(),
-    end: end.toJSDate(),
+    // Kirim objek Luxon apa adanya, JANGAN .toJSDate(). Date polos tidak membawa
+    // zona, jadi ical-generator memformatnya pakai TZ sistem container (UTC di
+    // node:alpine) lalu menempel label TZID=Asia/Jakarta -> jam mundur 7 jam.
+    start: input.start,
+    end,
     allDay: input.allDay,
     timezone: config.TIMEZONE,
     summary: input.title,

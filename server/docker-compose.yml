@@ -37,6 +37,9 @@ services:
     environment:
       CALDAV_URL: http://radicale:5232/
       DATA_DIR: /app/data
+      # Container node:alpine defaultnya UTC. Diselaraskan supaya log dan operasi
+      # tanggal apa pun yang tidak eksplisit bertimezone tetap masuk akal.
+      TZ: ${TIMEZONE:-Asia/Jakarta}
     volumes:
       - ./data:/app/data
     # Perlu TTY supaya QR code Baileys terbaca lewat `docker compose logs`.
