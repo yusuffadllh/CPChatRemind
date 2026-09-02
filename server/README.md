@@ -9,6 +9,20 @@ Pesan WA → Baileys → react ⏳ → filter → Gemini → CalDAV / notes.json
 
 Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau `/note`.
 
+## Perintah WhatsApp
+
+| Perintah | Fungsi |
+| --- | --- |
+| `/catat wifi rumah 12345` | Simpan catatan (juga `/note`) |
+| `/ingatkan besok jam 3 sore rapat` | Buat event + alarm di kalender HP |
+| `/list` | 10 catatan terakhir; `/list 25` untuk lebih banyak (maks 30) |
+| `/cari wifi` | Cari di judul dan isi catatan |
+| `/agenda` | Event mendatang yang sudah tersimpan |
+| `/bantuan` | Daftar perintah (juga `/help`, `/menu`) |
+
+Perintah baca dijawab langsung dari `notes.jsonl` tanpa memanggil Gemini, jadi gratis
+dan instan. Reaksi 📖 menandakan perintah baca berhasil dijalankan.
+
 ## Prasyarat
 
 | Kebutuhan | Keterangan |
@@ -237,6 +251,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | [src/index.ts](src/index.ts) | Entrypoint: verifikasi CalDAV, start Baileys, shutdown SIGINT/SIGTERM |
 | [src/whatsapp.ts](src/whatsapp.ts) | Koneksi Baileys, QR, reconnect, deteksi self-chat, `react()`, `reply()` |
 | [src/handler.ts](src/handler.ts) | Alur: filter → react ⏳ → ekstrak → simpan → react hasil |
+| [src/commands.ts](src/commands.ts) | Perintah baca `/list`, `/cari`, `/agenda`, `/bantuan` |
 | [src/gemini.ts](src/gemini.ts) | Prompt Bahasa Indonesia + response schema terstruktur |
 | [src/caldav.ts](src/caldav.ts) | Bangun ICS + `PUT` ke Radicale, cache kalender |
 | [src/notes.ts](src/notes.ts) | Catatan JSONL append-only |

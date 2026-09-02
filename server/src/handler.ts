@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import type { WASocket } from 'baileys';
 import { createEvent } from './caldav.js';
+import { parseCommand, runCommand } from './commands.js';
 import { config, isWhitelisted } from './config.js';
 import { extract, parseLocal } from './gemini.js';
 import { logger } from './logger.js';
@@ -14,6 +15,7 @@ const EMOJI = {
   note: '📝',
   ignored: '🤷',
   failed: '❌',
+  read: '📖',
 } as const;
 
 /** Pesan yang sedang diproses, biar kiriman ganda tidak dobel dikerjakan. */
@@ -52,6 +54,29 @@ export function createHandler(getSocket: () => WASocket) {
       return;
     }
 
+    const messageId = message.raw.key.id;
+    if (!messageId || inFlight.has(messageId)) return;
+
+    // Perintah baca (/list, /cari, /agenda, /bantuan) dijawab tanpa lewat Gemini.
+    const command = parseCommand(message.text);
+    if (command) {
+      inFlight.add(messageId);
+      const log = logger.child({ from: message.senderPhone });
+      const sock = getSocket();
+      try {
+        const answer = await runCommand(command);
+        await react(sock, message.raw, EMOJI.read);
+        await reply(sock, message.raw, answer);
+        log.info({ command: command.name }, 'Perintah dijalankan');
+      } catch (error) {
+        log.error({ err: error, command: command.name }, 'Perintah gagal');
+        await react(sock, message.raw, EMOJI.failed);
+      } finally {
+        inFlight.delete(messageId);
+      }
+      return;
+    }
+
     const payload = stripKeyword(message.text);
     if (!payload) {
       logger.debug(
@@ -61,8 +86,6 @@ export function createHandler(getSocket: () => WASocket) {
       return;
     }
 
-    const messageId = message.raw.key.id;
-    if (!messageId || inFlight.has(messageId)) return;
     inFlight.add(messageId);
 
     const sock = getSocket();
@@ -74,7 +97,11 @@ export function createHandler(getSocket: () => WASocket) {
       const result = await extract(payload, message.senderPhone);
       log.debug({ result }, 'Hasil ekstraksi');
 
-      if (result.type === 'ignore') {
+      // Kata kunci eksplisit = perintah langsung, jadi "ignore" dari Gemini
+      // tidak boleh membatalkannya (mis. "/catat tes" tetap tersimpan).
+      const type = result.type === 'ignore' && config.REQUIRE_KEYWORD ? 'note' : result.type;
+
+      if (type === 'ignore') {
         await react(sock, message.raw, EMOJI.ignored);
         return;
       }
@@ -84,7 +111,7 @@ export function createHandler(getSocket: () => WASocket) {
       const body = result.note?.trim() || payload;
 
       // Event tanpa waktu tidak bisa masuk kalender, turunkan jadi catatan.
-      if (result.type === 'event' && start) {
+      if (type === 'event' && start) {
         const uid = await createEvent({
           title,
           description: `${body}\n\n— dari WhatsApp: ${message.senderPhone}`,
