@@ -1,7 +1,9 @@
 import { DateTime } from 'luxon';
-import { config } from './config.js';
+import { config, MEDIA_KEYWORD, TASK_KEYWORD } from './config.js';
 import { describeAlarm, formatLead } from './duration.js';
+import { formatBytes } from './media.js';
 import { readNotes, type Note } from './notes.js';
+import { formatMoment } from './time.js';
 
 /** Batas baris supaya balasan WhatsApp tidak jadi tembok teks. */
 const DEFAULT_LIMIT = 10;
@@ -47,6 +49,32 @@ export function parseCommand(text: string): Command | null {
   return { name, argument: rest.join(' ').trim() };
 }
 
+/** Beda maksimal satu huruf (sisip/hapus/tukar), cukup untuk salah ketik biasa. */
+function nearlySame(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a === b) return true;
+
+  if (a.length === b.length) {
+    let diff = 0;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i] && (diff += 1) > 1) return false;
+    }
+    return true;
+  }
+
+  // Satu huruf hilang: samakan sisanya setelah melewati posisi yang beda.
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  let i = 0;
+  let skipped = false;
+  for (let j = 0; j < short.length; i += 1, j += 1) {
+    if (long[i] === short[j]) continue;
+    if (skipped) return false;
+    skipped = true;
+    j -= 1;
+  }
+  return true;
+}
+
 /**
  * Teks diawali "/" tapi bukan perintah apa pun dan bukan kata kunci simpan.
  * Tanpa ini pesan salah tulis hilang tanpa jawaban sama sekali.
@@ -59,18 +87,14 @@ export function unknownCommandHint(text: string): string | null {
   if (ALIASES[head] || config.KEYWORDS.includes(head)) return null;
 
   const known = [...new Set([...config.KEYWORDS, ...SUGGESTED])];
-  const guess = known.find((item) => item.startsWith(head) || head.startsWith(item));
+  const guess =
+    known.find((item) => item.startsWith(head) || head.startsWith(item)) ??
+    known.find((item) => nearlySame(item, head));
 
   return [
     `🤷 Perintah \`${head}\` tidak dikenal.`,
     guess ? `Maksudnya \`${guess}\`?` : 'Kirim `/bantuan` untuk lihat semua perintah.',
   ].join(' ');
-}
-
-function formatMoment(iso: string): string {
-  const parsed = DateTime.fromISO(iso, { zone: config.TIMEZONE });
-  if (!parsed.isValid) return '-';
-  return parsed.setLocale('id').toFormat('ccc, dd LLL yyyy • HH:mm');
 }
 
 function preview(body: string): string {
@@ -88,6 +112,10 @@ function renderNote(index: number, note: Note): string {
 
   if (note.eventStart && note.reminderMinutes !== undefined) {
     rows.push(`   ${describeAlarm(note.reminderMinutes)}`);
+  }
+
+  if (note.attachment) {
+    rows.push(`   📎 ${formatBytes(note.attachment.bytes)} · \`${note.attachment.path}\``);
   }
 
   const body = preview(note.body);
@@ -146,7 +174,24 @@ function helpText(): string {
     '`... pas jamnya` → bunyi tepat saat acara mulai',
     `Kalau tidak disebut, dipakai ${fallback}.`,
     '',
-    '*4. Lihat yang sudah tersimpan*',
+    '*4. Pengingat tugas* — bot yang nge-WA kamu',
+    `\`${TASK_KEYWORD} project PCV bikin game HSV, deadline 20 Oktober\``,
+    'Boleh beberapa baris sekaligus, tulis apa adanya:',
+    `\`${TASK_KEYWORD} Project PCV\` / \`Bikin game berbasis HSV\` / \`Push ke GitHub + README\` / \`Deadline 20 Okt\``,
+    'Bedanya dengan `/ingatkan`: ini *tidak* masuk kalender, tapi bot yang',
+    'mengirim pesan WA ke kamu beberapa kali sebelum tenggat.',
+    'Jarak pengingatnya dihitung dari taksiran kesulitan tugasnya.',
+    'Tenggat wajib ada tanggalnya — “deadline UTS” saja belum bisa dijadwalkan.',
+    '',
+    '*5. Simpan foto / video*',
+    `Hanya \`${MEDIA_KEYWORD}\` yang menyimpan berkasnya ke server, dan hanya foto & video.`,
+    `Kirim fotonya dengan keterangan \`${MEDIA_KEYWORD} struk belanja bulan ini\`.`,
+    `Keterangan boleh cuma kata kuncinya saja, mis. \`${MEDIA_KEYWORD}\`.`,
+    `Foto lama juga bisa: balas fotonya lalu tulis \`${MEDIA_KEYWORD}\`.`,
+    `Maks ${config.MEDIA_MAX_MB} MB; lokasi berkasnya dibalas ke kamu.`,
+    `Kata kunci lain (mis. \`${primary}\`) cuma mencatat keterangannya, berkasnya tidak disimpan.`,
+    '',
+    '*6. Lihat yang sudah tersimpan*',
     '`/list` — 10 catatan terakhir',
     '`/list 25` — sebanyak yang diminta (maks 30)',
     '`/cari wifi` — cari di judul & isi',
@@ -154,8 +199,8 @@ function helpText(): string {
     '`/bantuan` — pesan ini (juga `/help`, `/menu`, `/start`)',
     '',
     '*Arti reaksi emoji di pesanmu*',
-    '⏳ sedang diproses · 📅 jadi pengingat · 📝 jadi catatan',
-    '📖 perintah baca · 🤷 diabaikan · ❌ gagal (alasannya dibalas)',
+    '⏳ sedang diproses · 📅 jadi pengingat · 🎯 jadi tugas · 📝 jadi catatan',
+    '💾 berkas tersimpan · 📖 perintah baca · 🤷 diabaikan · ❌ gagal',
     '',
     `🕒 Zona waktu: ${config.TIMEZONE}`,
     '📱 Pengingat muncul di Kalender HP lewat DAVx5.',
@@ -164,11 +209,25 @@ function helpText(): string {
 
 /** Balasan singkat kalau kata kunci dikirim tanpa isi, mis. hanya "/catat". */
 export function emptyPayloadHint(keyword: string): string {
+  if (keyword === TASK_KEYWORD) {
+    return [
+      `🎯 \`${keyword}\` masih kosong. Tulis tugas dan tenggatnya:`,
+      `\`${keyword} laporan praktikum, dikumpul Jumat jam 5 sore\``,
+      `\`${keyword} project PCV bikin game HSV, push GitHub + README, deadline 20 Okt\``,
+      '',
+      'Boleh beberapa baris. Tenggatnya harus ada tanggal/harinya biar bisa dijadwalkan.',
+      'Kirim `/bantuan` untuk daftar lengkap.',
+    ].join('\n');
+  }
+
   return [
     `✏️ \`${keyword}\` masih kosong. Tulis isinya setelah kata kunci:`,
     `\`${keyword} beli beras 5kg\``,
     '`/ingatkan besok jam 3 sore rapat, ingetin 1 jam sebelumnya`',
     '',
+    keyword === MEDIA_KEYWORD
+      ? `Untuk menyimpan berkas, lampirkan foto atau video dengan keterangan \`${keyword}\`.`
+      : `Mau simpan foto/video? Pakai \`${MEDIA_KEYWORD}\` sebagai keterangannya.`,
     'Kirim `/bantuan` untuk daftar lengkap.',
   ].join('\n');
 }

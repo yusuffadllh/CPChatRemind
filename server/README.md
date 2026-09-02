@@ -1,13 +1,17 @@
 # CPChatRemind — server
 
-Bot Baileys yang mengubah pesan WhatsApp menjadi event CalDAV atau catatan.
+Bot Baileys yang mengubah pesan WhatsApp menjadi event CalDAV, catatan, atau
+pengingat tugas yang dikirim balik lewat WhatsApp.
 Untuk gambaran umum project, lihat [README utama](../README.md).
 
 ```
-Pesan WA → Baileys → react ⏳ → filter → Gemini → CalDAV / notes.jsonl → react 📅 📝 🤷 ❌
+Pesan WA → Baileys → react ⏳ → filter → [simpan foto/video] → Gemini → CalDAV / notes.jsonl / tasks.jsonl → react 📅 🎯 📝 💾 🤷 ❌
+                                                                                        ↓
+                                                       penjadwal tiap menit → pengingat tugas via WA
 ```
 
-Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau `/note`.
+Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, `/note`,
+`/simpan`, atau `/tugas`.
 
 ## Perintah WhatsApp
 
@@ -16,6 +20,8 @@ Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau 
 | `/catat wifi rumah 12345` | Simpan catatan (juga `/note`) |
 | `/ingatkan besok jam 3 sore rapat` | Buat event + alarm di kalender HP |
 | `/ingatkan besok jam 3 rapat, ingetin 2 jam sebelumnya` | Sama, tapi jam alarmnya diatur sendiri |
+| `/tugas laporan PCV, deadline 20 Okt` | Bot yang nge-WA kamu berlapis sebelum tenggat (bukan event) |
+| foto/video + keterangan `/simpan struk` | Berkasnya ikut disimpan ke server, sekalian dicatat |
 | `/list` | 10 catatan terakhir; `/list 25` untuk lebih banyak (maks 30) |
 | `/cari wifi` | Cari di judul dan isi catatan |
 | `/agenda` | Event mendatang yang sudah tersimpan |
@@ -43,6 +49,83 @@ Waktu alarm ikut apa yang ditulis di pesan, tidak harus 30 menit terus:
 
 Batas atas 7 hari (10080 menit). Balasan bot selalu menyebut alarm yang dipakai,
 jadi kalau Gemini salah tangkap langsung kelihatan.
+
+### Pengingat tugas (`/tugas`)
+
+Bedanya dengan `/ingatkan`: tugas **tidak** masuk kalender. Botlah yang mengirim
+pesan WhatsApp beberapa kali sebelum tenggat, dan jaraknya dihitung dari taksiran
+kesulitan tugasnya — makin berat, makin awal diingatkan.
+
+Pesan boleh beberapa baris dan berisi beberapa sub-pekerjaan, tulis apa adanya:
+
+```
+/tugas Project PCV
+Bikin game berbasis HSV
+Push di github dan buat readme sbg laporan
+Deadline 20 Oktober
+```
+
+Balasannya menyebut tenggat, skor kesulitan, perkiraan lama kerja, alasan
+taksirannya, dan daftar jam pengingatnya — jadi taksiran yang ngawur langsung
+kelihatan dan bisa dikirim ulang dengan detail yang lebih jelas.
+
+| Kesulitan | Pengingat pertama | Contoh |
+| --- | --- | --- |
+| 1 (sepele) | 2× lama kerja sebelum tenggat | isi form, upload berkas |
+| 3 (sedang) | 3× lama kerja | laporan praktikum, tugas coding kecil |
+| 5 (sangat berat) | 5× lama kerja, maks 30 hari | project besar, riset |
+
+Setelah pengingat pertama, jaraknya meluruh separuh-separuh (mis. H-2.5 hari →
+H-1.25 hari → H-15 jam), ditutup satu aba-aba terakhir maksimal 4 jam sebelum
+tenggat. Lapisan yang terlalu berdempet dibuang otomatis.
+
+Catatan penting:
+
+- **Tenggat wajib punya tanggal.** "Deadline UTS" atau "pas kumpul" tidak bisa
+  dijadwalkan; tugasnya tetap dicatat, tapi bot minta dikirim ulang begitu
+  tanggalnya jelas. Bot sengaja tidak mengarang tanggal.
+- Kalau tanggalnya disebut tanpa jam, dipakai 23:59.
+- Tugas yang dicatat mepet tetap dapat pengingat: lapisan yang waktunya sudah
+  lewat dikirim sekali di sapuan berikutnya, selama tenggatnya belum lewat.
+- Begitu tenggat lewat, sisa pengingat dibatalkan dan tugasnya ditutup.
+- Kalau kirim gagal (mis. socket sedang reconnect), lapisannya tetap `pending`
+  dan dicoba lagi menit berikutnya.
+- Taksiran kesulitan memakai Gemini dengan pencarian Google (`TASK_SEARCH_GROUNDING`),
+  supaya teknologi yang tidak umum tidak diremehkan. Kalau Gemini gagal total,
+  dipakai taksiran default 3/5 · 4 jam supaya pengingat tetap terjadwal.
+- Status pengingat disimpan di `data/tasks.jsonl`. Beda dari `notes.jsonl` yang
+  append-only, berkas ini ditulis ulang setiap ada perubahan status.
+
+### Menyimpan foto & video
+
+Hanya `/simpan` yang menulis berkas ke disk, dan hanya untuk foto dan video.
+Audio, dokumen, dan stiker tidak diunduh. Kata kunci lain (`/catat`, `/note`,
+`/ingatkan`) tetap mencatat keterangannya tanpa menyimpan berkasnya.
+
+| Cara kirim | Hasil |
+| --- | --- |
+| Foto + keterangan `/simpan struk belanja` | Berkas tersimpan, catatan judulnya dari keterangan |
+| Foto + keterangan `/simpan` saja | Berkas tersimpan, judul otomatis (mis. "Foto dari WhatsApp") |
+| Balas foto lama lalu tulis `/simpan` | Berkas foto yang dibalas itu yang disimpan |
+| Foto + keterangan `/catat struk belanja` | Cuma jadi catatan teks, berkas tidak disimpan |
+| Foto + `/ingatkan besok jam 3 bayar ini` | Event dibuat, berkas tidak disimpan |
+| Foto tanpa keterangan | Diabaikan (kecuali `REQUIRE_KEYWORD=false`) |
+
+Balasan bot menyebut path relatifnya, mis.
+`📎 foto 240 KB → media/2026-09/20260903-120000-ab12cd34.jpg`.
+
+Catatan teknis:
+
+- `/simpan` selalu dikenali walau tidak ditulis di `KEYWORDS`; kata kuncinya
+  dipatok di kode ([src/config.ts](src/config.ts)) karena cuma jalur ini yang
+  menulis berkas ke disk.
+- Nama berkas dibuat sendiri dari waktu + UUID. Nama kiriman tidak pernah dipakai,
+  jadi `../` atau karakter aneh tidak bisa menembus folder.
+- Ekstensi diambil dari daftar mimetype yang dikenal; yang tidak dikenal jatuh ke
+  `.jpg` untuk foto dan `.mp4` untuk video.
+- Ukuran dicek dua kali: klaim pengirim (ditolak sebelum unduh) lalu isi sebenarnya.
+- Kalau unduhan gagal tapi pesannya ada teks, catatan/event-nya tetap dibuat dan
+  balasan menyebut ⚠️ lampiran tidak tersimpan.
 
 ## Prasyarat
 
@@ -232,6 +315,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | Wajib. API key Google AI Studio |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Model yang dipakai. `gemini-2.0-flash` dijadwalkan mati 1 Juni 2026 |
+| `GEMINI_RETRY_ATTEMPTS` | `4` | Percobaan ke Gemini (termasuk yang pertama) kalau balasannya 503 "high demand" / 429 / 5xx. Jeda naik 1s → 8s. Rentang 1–8 |
 
 **Siapa yang boleh menyuruh bot**
 
@@ -240,7 +324,19 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | `ALLOW_SELF_CHAT` | `true` | Proses pesan dari chat ke nomor sendiri |
 | `WHITELIST` | kosong | Nomor lain yang diizinkan, dipisah koma. Format bebas (`+62…`, `08…`) — dicocokkan lewat 9 digit terakhir. Kosong = hanya self-chat |
 | `REQUIRE_KEYWORD` | `true` | Hanya proses pesan berawalan `KEYWORDS`. Set `false` kalau mau semua pesan dibaca |
-| `KEYWORDS` | `/catat,/ingatkan,/note` | Awalan yang diterima; dicocokkan tanpa peduli huruf besar-kecil, dan otomatis dibuang dari judul |
+| `KEYWORDS` | `/catat,/ingatkan,/note` | Awalan yang diterima; dicocokkan tanpa peduli huruf besar-kecil, dan otomatis dibuang dari judul. `/simpan` dan `/tugas` selalu ikut walau tidak ditulis di sini |
+
+**Foto & video**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `MEDIA_MAX_MB` | `25` | Batas ukuran foto/video yang diunduh ke `data/media/` lewat `/simpan`. Lebih besar ditolak. Rentang 1–100 |
+
+**Pengingat tugas**
+
+| Key | Default | Arti |
+| --- | --- | --- |
+| `TASK_SEARCH_GROUNDING` | `true` | Izinkan Gemini mencari di Google saat menaksir kesulitan tugas. Lebih akurat untuk teknologi tidak umum, tapi ditagih per pencarian. `false` = taksiran tanpa pencarian |
 
 **Waktu**
 
@@ -261,7 +357,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 
 | Key | Default | Arti |
 | --- | --- | --- |
-| `DATA_DIR` | `./data` | Lokasi `auth/` dan `notes.jsonl` |
+| `DATA_DIR` | `./data` | Lokasi `auth/`, `notes.jsonl`, `tasks.jsonl`, dan `media/` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `BAILEYS_LOG_LEVEL` | `warn` | Log internal Baileys, dipisah karena sangat berisik |
 
@@ -269,13 +365,17 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 
 | File | Isi |
 | --- | --- |
-| [src/index.ts](src/index.ts) | Entrypoint: verifikasi CalDAV, start Baileys, shutdown SIGINT/SIGTERM |
-| [src/whatsapp.ts](src/whatsapp.ts) | Koneksi Baileys, QR, reconnect, deteksi self-chat, `react()`, `reply()` |
+| [src/index.ts](src/index.ts) | Entrypoint: verifikasi CalDAV, start Baileys, start penjadwal, shutdown SIGINT/SIGTERM |
+| [src/whatsapp.ts](src/whatsapp.ts) | Koneksi Baileys, QR, reconnect, deteksi self-chat, `react()`, `reply()`, `sendText()` |
 | [src/handler.ts](src/handler.ts) | Alur: filter → react ⏳ → ekstrak → simpan → react hasil |
 | [src/commands.ts](src/commands.ts) | Perintah baca `/list`, `/cari`, `/agenda`, `/bantuan` |
-| [src/gemini.ts](src/gemini.ts) | Prompt Bahasa Indonesia + response schema terstruktur |
+| [src/gemini.ts](src/gemini.ts) | Prompt Bahasa Indonesia, response schema terstruktur, taksiran kesulitan tugas |
 | [src/caldav.ts](src/caldav.ts) | Bangun ICS + `PUT` ke Radicale, cache kalender |
 | [src/notes.ts](src/notes.ts) | Catatan JSONL append-only |
+| [src/tasks.ts](src/tasks.ts) | Penyimpanan tugas + perencanaan lapisan pengingat |
+| [src/scheduler.ts](src/scheduler.ts) | Sapuan tiap menit: kirim pengingat yang jatuh tempo, tutup tugas kedaluwarsa |
+| [src/media.ts](src/media.ts) | Deteksi foto/video, unduh, simpan ke `data/media/` |
+| [src/time.ts](src/time.ts) | Format tanggal Bahasa Indonesia + "sekarang" sesuai `TIMEZONE` |
 | [src/config.ts](src/config.ts) | Validasi env dengan zod, pencocokan whitelist 9 digit akhir |
 | [src/logger.ts](src/logger.ts) | pino + pino-pretty |
 
@@ -285,6 +385,8 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 data/
   auth/            sesi WhatsApp — RAHASIA, setara akses penuh ke akunmu
   notes.jsonl      catatan, satu JSON per baris
+  tasks.jsonl      tugas + status tiap lapisan pengingat (ditulis ulang saat berubah)
+  media/2026-09/   foto & video dari `/simpan`, dikelompokkan per bulan
 radicale/data/     penyimpanan kalender Radicale
 radicale/config/
   config           konfigurasi Radicale
@@ -301,9 +403,14 @@ radicale/config/
 | Bot berhenti dengan pesan sesi dicabut | Perangkat tertaut dihapus dari HP. Hapus `data/auth/` lalu scan QR lagi |
 | `Kalender "X" tidak ditemukan` | Nama `CALDAV_CALENDAR` tidak sama dengan di Radicale. Log menampilkan daftar yang tersedia |
 | Container gagal tulis ke `data/` | Bind mount belum di-`chown 1000:1000` |
-| Pesan tidak diproses sama sekali | Pesan harus berawalan `/catat`, `/ingatkan`, atau `/note` (default `REQUIRE_KEYWORD=true`). Cek juga `ALLOW_SELF_CHAT` / `WHITELIST` |
+| Pesan tidak diproses sama sekali | Pesan harus berawalan `/catat`, `/ingatkan`, `/note`, `/simpan`, atau `/tugas` (default `REQUIRE_KEYWORD=true`). Cek juga `ALLOW_SELF_CHAT` / `WHITELIST` |
+| Foto dikirim tapi berkasnya tidak tersimpan | Keterangannya harus diawali `/simpan`. Kata kunci lain sengaja hanya mencatat teksnya |
+| Audio/dokumen/stiker tidak tersimpan | Memang tidak didukung; hanya foto dan video yang diunduh |
+| Balasan `⚠️ Lampiran tidak tersimpan` | Berkas melewati `MEDIA_MAX_MB`, atau media lama sudah kedaluwarsa di server WA dan HP tidak bisa reupload |
 | Event dibuat tapi tidak muncul di HP | Sync DAVx5 masih menunggu polling; tarik-untuk-refresh atau percepat intervalnya |
 | Waktu event ngawur | `TIMEZONE` salah, atau pesannya memang ambigu — cek `LOG_LEVEL=debug` untuk melihat hasil ekstraksi |
+| `/tugas` dibalas "belum bisa dijadwalkan" | Tenggatnya tidak punya tanggal (mis. "deadline UTS"). Kirim ulang dengan tanggal/hari yang jelas |
+| Pengingat tugas tidak pernah datang | Cek `sudo docker compose logs bot \| grep penjadwal`, lalu `cat data/tasks.jsonl` — kalau `status` sudah `done`, tenggatnya sudah lewat |
 
 Log terstruktur: `docker compose logs -f bot`. Set `LOG_LEVEL=debug` untuk melihat JSON
 hasil ekstraksi Gemini per pesan.

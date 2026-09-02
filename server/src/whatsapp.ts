@@ -3,6 +3,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   jidNormalizedUser,
+  normalizeMessageContent,
   useMultiFileAuthState,
   type WAMessage,
   type WASocket,
@@ -11,6 +12,7 @@ import { join } from 'node:path';
 import qrcode from 'qrcode-terminal';
 import { config, digitsOnly } from './config.js';
 import { logger } from './logger.js';
+import { describeMedia, type MediaInfo } from './media.js';
 
 export interface IncomingMessage {
   /** Chat tujuan balasan. */
@@ -19,6 +21,8 @@ export interface IncomingMessage {
   senderPhone: string;
   text: string;
   isSelfChat: boolean;
+  /** Ada isinya kalau pesan membawa lampiran; berkasnya belum diunduh. */
+  media?: MediaInfo;
   raw: WAMessage;
 }
 
@@ -42,7 +46,9 @@ export function getSocket(): WASocket {
 
 /** Ambil teks dari berbagai bentuk pesan yang mungkin. */
 function extractText(message: WAMessage): string | null {
-  const content = message.message;
+  // Buka bungkus ephemeral / viewOnce / documentWithCaption dulu, supaya
+  // keterangan foto sekali-lihat dan dokumen berkaption ikut terbaca.
+  const content = normalizeMessageContent(message.message);
   if (!content) return null;
 
   const text =
@@ -50,7 +56,7 @@ function extractText(message: WAMessage): string | null {
     content.extendedTextMessage?.text ??
     content.imageMessage?.caption ??
     content.videoMessage?.caption ??
-    content.documentWithCaptionMessage?.message?.documentMessage?.caption ??
+    content.documentMessage?.caption ??
     null;
 
   const trimmed = text?.trim();
@@ -101,6 +107,21 @@ function isSelfChatJid(sock: WASocket, message: WAMessage): boolean {
   }
 
   return Boolean(ownPhone) && sameNumber(jidDigits, ownPhone);
+}
+
+/**
+ * Cek apakah sebuah JID adalah milik akun ini, lewat nomor telepon maupun LID.
+ * Dipakai untuk menandai `fromMe` pada media di pesan yang dibalas.
+ */
+function ownJidChecker(sock: WASocket): (jid: string) => boolean {
+  const ownPhone = digitsOnly(jidNormalizedUser(sock.user?.id ?? '').split('@')[0] ?? '');
+  const ownLid = digitsOnly(jidNormalizedUser(sock.user?.lid ?? '').split('@')[0] ?? '');
+
+  return (jid: string): boolean => {
+    const digits = digitsOnly(jidNormalizedUser(jid).split('@')[0] ?? '');
+    if (!digits) return false;
+    return sameNumber(digits, ownPhone) || sameNumber(digits, ownLid);
+  };
 }
 
 export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket> {
@@ -158,6 +179,8 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
       return;
     }
 
+    const isOwnJid = ownJidChecker(sock);
+
     for (const message of messages) {
       const jid = message.key.remoteJid;
       if (!jid) continue;
@@ -169,6 +192,7 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
 
       const isSelfChat = isSelfChatJid(sock, message);
       const text = extractText(message);
+      const media = describeMedia(message, isOwnJid);
       const senderPhone = resolveSenderPhone(message);
 
       logger.debug(
@@ -180,6 +204,7 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
           fromMe: message.key.fromMe,
           isSelfChat,
           text,
+          media: media ? { kind: media.kind, mimetype: media.mimetype, quoted: media.quoted } : undefined,
         },
         'Pesan masuk',
       );
@@ -187,10 +212,19 @@ export async function startWhatsApp(onMessage: MessageHandler): Promise<WASocket
       // Pesan keluar hanya relevan kalau ini chat ke diri sendiri.
       if (message.key.fromMe && !isSelfChat) continue;
 
-      if (!text) continue;
+      // Tanpa teks dan tanpa lampiran tidak ada yang bisa dikerjakan.
+      // Lampiran tanpa keterangan tetap diteruskan; handler yang memutuskan.
+      if (!text && !media) continue;
 
       try {
-        await onMessage({ jid, senderPhone, text, isSelfChat, raw: message });
+        await onMessage({
+          jid,
+          senderPhone,
+          text: text ?? '',
+          isSelfChat,
+          ...(media ? { media } : {}),
+          raw: message,
+        });
       } catch (error) {
         logger.error({ err: error }, 'Gagal memproses pesan');
       }
@@ -218,4 +252,16 @@ export async function reply(sock: WASocket, message: WAMessage, text: string): P
   } catch (error) {
     logger.warn({ err: error }, 'Gagal mengirim balasan');
   }
+}
+
+/**
+ * Kirim pesan baru tanpa membalas pesan tertentu. Dipakai penjadwal pengingat
+ * tugas, yang tidak punya pesan asal untuk di-quote.
+ *
+ * Beda dari `reply`: error dilempar, tidak cuma dicatat, supaya penjadwal tahu
+ * pengingatnya belum terkirim dan bisa dicoba lagi di sapuan berikutnya.
+ */
+export async function sendText(jid: string, text: string): Promise<void> {
+  const sock = getSocket();
+  await sock.sendMessage(jid, { text });
 }

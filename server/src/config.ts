@@ -27,6 +27,15 @@ const schema = z.object({
     .default('/catat,/ingatkan,/note')
     .transform((value) => csv(value).map((item) => item.toLowerCase())),
 
+  /** Batas ukuran foto/video yang mau diunduh ke DATA_DIR/media/. */
+  MEDIA_MAX_MB: z.coerce.number().int().min(1).max(100).default(25),
+
+  /**
+   * Izinkan Gemini mencari di Google saat menaksir kesulitan tugas.
+   * Lebih akurat untuk teknologi yang tidak umum, tapi ditagih per pencarian.
+   */
+  TASK_SEARCH_GROUNDING: z.stringbool().default(true),
+
   TIMEZONE: z.string().default('Asia/Jakarta'),
   /** Dipakai kalau pesan tidak menyebut sendiri mau diingatkan berapa lama sebelumnya. */
   REMINDER_MINUTES_BEFORE: z.coerce.number().int().min(0).max(MAX_REMINDER_MINUTES).default(30),
@@ -52,7 +61,29 @@ if (!parsed.success) {
   process.exit(1);
 }
 
-export const config = parsed.data;
+/**
+ * Kata kunci yang selain mencatat juga menyimpan foto/video ke server.
+ * Sengaja tidak lewat .env: hanya satu jalur ini yang menulis berkas ke disk,
+ * jadi lebih baik namanya tetap sama di semua pemasangan.
+ */
+export const MEDIA_KEYWORD = '/simpan';
+
+/**
+ * Kata kunci tugas: bikin jadwal pengingat WhatsApp, bukan event kalender.
+ * Sama seperti MEDIA_KEYWORD, dipatok di kode supaya alurnya tidak bisa
+ * hilang gara-gara .env lama.
+ */
+export const TASK_KEYWORD = '/tugas';
+
+const extraKeywords = [MEDIA_KEYWORD, TASK_KEYWORD].filter(
+  (keyword) => !parsed.data.KEYWORDS.includes(keyword),
+);
+
+export const config = {
+  ...parsed.data,
+  // /simpan dan /tugas selalu dikenali, walau .env cuma menyebut yang lain.
+  KEYWORDS: [...parsed.data.KEYWORDS, ...extraKeywords],
+};
 
 /** Hanya digit, dipakai untuk mencocokkan nomor tanpa peduli format +62 / 08. */
 export const digitsOnly = (value: string): string => value.replace(/\D/g, '');

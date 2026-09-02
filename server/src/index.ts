@@ -2,6 +2,7 @@ import { verifyConnection } from './caldav.js';
 import { config } from './config.js';
 import { createHandler } from './handler.js';
 import { logger } from './logger.js';
+import { startScheduler } from './scheduler.js';
 import { getSocket, startWhatsApp } from './whatsapp.js';
 
 async function main(): Promise<void> {
@@ -18,6 +19,8 @@ async function main(): Promise<void> {
 
   await verifyConnection();
   await startWhatsApp(createHandler(getSocket));
+  // Setelah socket siap: sapuan pengingat tugas tiap menit.
+  startScheduler();
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

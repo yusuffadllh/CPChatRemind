@@ -17,23 +17,27 @@
 ## Apa ini
 
 Bot WhatsApp pribadi yang membaca pesanmu, memahami maksudnya dengan Gemini, lalu
-menuliskannya ke **aplikasi Kalender bawaan Android** atau menyimpannya sebagai catatan.
+menuliskannya ke **aplikasi Kalender bawaan Android**, menyimpannya sebagai catatan,
+atau mengingatkanmu balik lewat WhatsApp sebelum tenggat tugas.
 
 Tidak ada form, tidak ada tombol. Kirim pesan ke chat *Pesan ke Diri Sendiri* dengan awalan
-`/catat` atau `/ingatkan`:
+`/catat`, `/ingatkan`, `/tugas`, atau `/simpan`:
 
 | Kamu kirim | Bot balas | Hasil |
 | --- | --- | --- |
 | `/ingatkan besok jam 3 meeting sama tim` | 📅 | Event besok 15:00 + reminder 30 menit sebelumnya |
 | `/ingatkan Senin depan bayar listrik` | 📅 | Event Senin 09:00 (jam default) |
+| `/tugas laporan PCV, deadline 20 Okt` | 🎯 | Bot nge-WA kamu berlapis sebelum tenggat |
 | `/catat wifi rumah passwordnya 12345` | 📝 | Tersimpan sebagai catatan |
+| foto + keterangan `/simpan struk` | 💾 | Berkasnya ikut disimpan di server |
 | `haha iya bener` | — | Tanpa awalan, diabaikan sepenuhnya |
 
 Awalan itu membuat obrolan biasa tidak pernah dikirim ke Gemini — lebih hemat kuota dan
 lebih privat. Kalau mau bot membaca semua pesan, set `REQUIRE_KEYWORD=false`.
 
 React emoji di pesanmu berfungsi sebagai status: ⏳ sedang diproses, 📅 event dibuat,
-📝 dicatat, 🤷 diabaikan, ❌ gagal (bot juga mengutip pesan dan menyebut alasannya).
+🎯 jadi tugas, 📝 dicatat, 💾 berkas tersimpan, 🤷 diabaikan, ❌ gagal (bot juga mengutip
+pesan dan menyebut alasannya).
 
 ## Cara kerja
 
@@ -49,11 +53,13 @@ Filter: whitelist nomor / self-chat / prefix kata kunci
         ▼
 Gemini → JSON { type, title, datetime_start, location, ... }
         │
-   ┌────┴────────────────────┐
-   ▼                         ▼
-CalDAV (Radicale)      data/notes.jsonl
-+ VALARM reminder
-        │                    react 📅 / 📝 / 🤷 / ❌
+   ┌────┬────────────────┬────────────┐
+   ▼                     ▼              ▼
+CalDAV (Radicale)      data/notes.jsonl  data/tasks.jsonl
++ VALARM reminder                         │
+        │                    react 📅 / 🎯 / 📝 / 🤷 / ❌
+        │                                 ▼
+        │                    penjadwal tiap menit → bot nge-WA kamu
         ▼
 DAVx5 di HP  →  Kalender bawaan Android
 ```
@@ -75,9 +81,13 @@ Ini juga bukan Google Calendar: datanya tinggal di servermu sendiri.
 - **Chat ke diri sendiri didukung.** Tidak butuh nomor kedua.
 - **Bahasa natural Indonesia.** `besok`, `Senin depan`, `nanti sore`, campur bahasa gaul.
 - **Reminder otomatis** sebelum acara (`VALARM`, default 30 menit).
+- **Pengingat tugas berlapis.** `/tugas` tidak masuk kalender; bot yang nge-WA kamu beberapa
+  kali sebelum tenggat, dan jaraknya disesuaikan dengan taksiran kesulitan tugasnya
+  (Gemini boleh mencari di Google supaya teknologi tidak umum tidak diremehkan).
+- **Foto & video tersimpan** lewat `/simpan`, dikelompokkan per bulan di `data/media/`.
 - **Status lewat react emoji**, jadi terlihat langsung di chat tanpa balasan berisik.
-- **Aktif hanya saat dipanggil.** Kata kunci `/catat` · `/ingatkan` · `/note`, plus whitelist
-  nomor kalau mau menerima perintah dari orang lain.
+- **Aktif hanya saat dipanggil.** Kata kunci `/catat` · `/ingatkan` · `/note` · `/tugas` ·
+  `/simpan`, plus whitelist nomor kalau mau menerima perintah dari orang lain.
 - **Turun kelas dengan aman**: kalau Gemini bilang "event" tapi waktunya tidak jelas,
   otomatis disimpan sebagai catatan alih-alih membuat event ngawur.
 - **Tanpa database.** Catatan ditulis sebagai JSONL, deploy tetap sederhana.

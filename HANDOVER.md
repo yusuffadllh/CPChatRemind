@@ -44,12 +44,12 @@ Filter: whitelist nomor / self-chat / prefix kata kunci (opsional)
         ↓
 Gemini → JSON terstruktur { type, title, datetime_start, ... }
         ↓
-   ┌──────────────────────┬────────────────────┐
-   │ type = event         │ type = note        │
-   ↓                      ↓
-CalDAV (Radicale)     data/notes.jsonl
-+ VALARM reminder
-        ↓  react 📅 / 📝 / 🤷 / ❌ + balasan ringkas
+   ┌──────────────────────┬────────────────────┬─────────────────────┐
+   │ type = event         │ type = note        │ type = task         │
+   ↓                      ↓                    ↓
+CalDAV (Radicale)     data/notes.jsonl     data/tasks.jsonl
++ VALARM reminder                          + penjadwal 60s → bot nge-WA user
+        ↓  react 📅 / 🎯 / 📝 / 💾 / 🤷 / ❌ + balasan ringkas
         ↓
 HP: DAVx5 sync Radicale → event muncul di Kalender bawaan Android
 ```
@@ -82,13 +82,19 @@ Lokasi: `E:\Project\wa-reminder\server\`. Panduan pemakaian lengkap ada di
 
 | File | Isi |
 |---|---|
-| `src/index.ts` | entrypoint: log config, `verifyConnection()` CalDAV, start Baileys, handle SIGINT/SIGTERM |
-| `src/whatsapp.ts` | Baileys: multi-file auth, QR di terminal, reconnect (delay 3s, berhenti kalau `loggedOut`), skip grup/status/newsletter, deteksi self-chat, `getSocket()`, `react()`, `reply()` |
-| `src/handler.ts` | gate whitelist/self-chat → strip kata kunci → react ⏳ → Gemini → CalDAV/notes → react hasil. Ada guard `inFlight` anti-dobel; event tanpa waktu valid diturunkan jadi catatan |
-| `src/gemini.ts` | prompt Bahasa Indonesia + `responseSchema` (`@google/genai`), inject tanggal/timezone sekarang, `parseLocal()` → Luxon |
+| `src/index.ts` | entrypoint: log config, `verifyConnection()` CalDAV, start Baileys, `startScheduler()`, handle SIGINT/SIGTERM |
+| `src/whatsapp.ts` | Baileys: multi-file auth, QR di terminal, reconnect (delay 3s, berhenti kalau `loggedOut`), skip grup/status/newsletter, deteksi self-chat, `getSocket()`, `react()`, `reply()`, `sendText()` |
+| `src/handler.ts` | gate whitelist/self-chat → strip kata kunci → react ⏳ → Gemini → CalDAV/notes/tasks → react hasil. Ada guard `inFlight` anti-dobel; event tanpa waktu valid diturunkan jadi catatan |
+| `src/commands.ts` | perintah baca `/list`, `/cari`, `/agenda`, `/bantuan` (dijawab dari `notes.jsonl`, tanpa Gemini) + petunjuk salah ketik |
+| `src/gemini.ts` | prompt Bahasa Indonesia + `responseSchema` (`@google/genai`), inject tanggal/timezone sekarang, `parseLocal()` → Luxon, `estimateDifficulty()` dengan Google Search grounding |
 | `src/caldav.ts` | build ICS (`ical-generator`) + `createCalendarObject` ke Radicale, cache kalender, `verifyConnection()` |
 | `src/notes.ts` | catatan JSONL append-only |
-| `src/config.ts` | validasi env pakai zod v4, `isWhitelisted()` cocokkan **9 digit terakhir** biar `+6281…` = `081…` |
+| `src/tasks.ts` | `tasks.jsonl` (tulis ulang atomik + antrean serial), perencanaan lapisan pengingat dari skor kesulitan |
+| `src/scheduler.ts` | `setInterval` 60s: kirim lapisan yang jatuh tempo lewat `sendText()`, tutup tugas yang tenggatnya lewat, gagal kirim = tetap `pending` |
+| `src/media.ts` | deteksi foto/video, unduh, simpan ke `data/media/<tahun-bulan>/` (hanya lewat `/simpan`) |
+| `src/duration.ts` | parsing "ingetin 2 jam sebelumnya", `formatLead()`, batas 7 hari |
+| `src/time.ts` | format tanggal Bahasa Indonesia + `now()` sesuai `TIMEZONE` |
+| `src/config.ts` | validasi env pakai zod v4, `isWhitelisted()` cocokkan **9 digit terakhir** biar `+6281…` = `081…`; `/simpan` & `/tugas` dipatok di kode |
 | `src/logger.ts` | pino + pino-pretty |
 | `Dockerfile`, `docker-compose.yml` | service bot + Radicale (`tomsquest/docker-radicale`), Radicale bind ke `127.0.0.1` saja |
 | `radicale/config/config` | htpasswd bcrypt, storage `/data/collections` |
@@ -100,9 +106,12 @@ bukan `latest` (`7.0.0-rc14`) karena rc belum stabil.
 ### Status verifikasi
 
 - ✅ `npm install` — 151 package, 0 vulnerability
-- ✅ `npm run typecheck` — bersih
-- ❌ Belum pernah dijalankan sungguhan (butuh `GEMINI_API_KEY` + Radicale hidup)
-- ❌ Docker image belum di-build
+- ✅ `npm run typecheck` / `npm run build` — bersih
+- ✅ Logika penjadwal tugas & penyimpanan `tasks.jsonl` diuji lewat probe sementara
+  (pengirim tiruan + `DATA_DIR` temp): lapisan jatuh tempo terkirim sekali, tenggat lewat
+  → `skipped`+`done`, gagal kirim → tetap `pending` dan dicoba lagi
+- ❌ `/tugas` belum pernah diuji dengan Gemini sungguhan atau kirim WA sungguhan
+- ❌ Fitur media (`/simpan`) belum pernah diuji di produksi
 
 ### Toolchain PC user
 

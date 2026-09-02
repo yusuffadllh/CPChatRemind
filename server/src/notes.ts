@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { config } from './config.js';
+import type { Attachment } from './media.js';
 
 export interface Note {
   id: string;
@@ -12,6 +13,8 @@ export interface Note {
   eventStart?: string;
   /** Menit alarm sebelum event; hanya ada di catatan yang punya eventStart. */
   reminderMinutes?: number;
+  /** Berkas yang ikut dikirim, tersimpan di DATA_DIR. */
+  attachment?: Attachment;
 }
 
 const filePath = join(config.DATA_DIR, 'notes.jsonl');
