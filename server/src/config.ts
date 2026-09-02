@@ -15,6 +15,8 @@ const csv = (value: string): string[] =>
 const schema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY wajib diisi'),
   GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
+  /** Termasuk percobaan pertama. Model gratis sering balas 503 saat ramai. */
+  GEMINI_RETRY_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(4),
 
   WHITELIST: z.string().default('').transform(csv),
   ALLOW_SELF_CHAT: z.stringbool().default(true),

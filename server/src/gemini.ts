@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { ApiError, GoogleGenAI, Type } from '@google/genai';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { config } from './config.js';
@@ -65,7 +65,35 @@ const responseSchema = {
   required: ['type', 'title', 'confidence'],
 } as const;
 
-const ai = new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
+const ai = new GoogleGenAI({
+  apiKey: config.GEMINI_API_KEY,
+  // SDK tidak retry apa-apa kalau retryOptions dikosongkan (sudah dites: 503 =
+  // 1 percobaan). Model gratis sering balas 503 "high demand", jadi dinyalakan
+  // dengan backoff eksponensial. Status yang di-retry default: 408, 429, 5xx.
+  httpOptions: {
+    retryOptions: {
+      attempts: config.GEMINI_RETRY_ATTEMPTS,
+      initialDelay: 1,
+      maxDelay: 8,
+    },
+  },
+});
+
+/** Pesan ramah untuk error yang sering muncul, biar balasan WA tidak berisi JSON mentah. */
+function friendlyError(error: unknown): Error {
+  if (!(error instanceof ApiError)) return error instanceof Error ? error : new Error(String(error));
+
+  if (error.status === 503) {
+    return new Error('Server Gemini sedang penuh. Coba kirim ulang beberapa saat lagi.');
+  }
+  if (error.status === 429) {
+    return new Error('Kuota Gemini habis untuk sementara. Coba lagi nanti.');
+  }
+  if (error.status === 400 || error.status === 403) {
+    return new Error('Gemini menolak permintaan; cek GEMINI_API_KEY dan GEMINI_MODEL.');
+  }
+  return new Error(`Gemini error ${error.status}`);
+}
 
 export async function extract(message: string, sender: string): Promise<Extraction> {
   const now = DateTime.now().setZone(config.TIMEZONE).setLocale('id');
@@ -81,16 +109,22 @@ export async function extract(message: string, sender: string): Promise<Extracti
     '"""',
   ].join('\n');
 
-  const response = await ai.models.generateContent({
-    model: config.GEMINI_MODEL,
-    contents: prompt,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      temperature: 0.1,
-      responseMimeType: 'application/json',
-      responseSchema,
-    },
-  });
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: config.GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema,
+      },
+    });
+  } catch (error) {
+    // Retry sudah habis di sini; ubah JSON mentah SDK jadi pesan yang bisa dibaca.
+    throw friendlyError(error);
+  }
 
   const text = response.text?.trim();
   if (!text) {

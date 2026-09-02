@@ -27,6 +27,20 @@ function isAllowed(message: IncomingMessage): boolean {
   return isWhitelisted(message.senderPhone);
 }
 
+/**
+ * Pesan error untuk dikirim balik ke WhatsApp. Detail lengkapnya sudah masuk log,
+ * jadi di sini cukup yang enak dibaca: jangan pernah bocorkan JSON mentah atau
+ * pesan panjang dari API pihak ketiga.
+ */
+function userMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'kesalahan tak terduga';
+  const text = error.message.trim();
+  if (!text || text.length > 160 || text.startsWith('{') || text.startsWith('[')) {
+    return 'kesalahan tak terduga, cek log server';
+  }
+  return text;
+}
+
 /** Buang prefix kata kunci; null berarti pesan tidak lolos filter. */
 function stripKeyword(text: string): string | null {
   if (!config.REQUIRE_KEYWORD) return text;
@@ -162,11 +176,7 @@ export function createHandler(getSocket: () => WASocket) {
     } catch (error) {
       log.error({ err: error }, 'Gagal memproses pesan');
       await react(sock, message.raw, EMOJI.failed);
-      await reply(
-        sock,
-        message.raw,
-        `❌ Gagal: ${error instanceof Error ? error.message : 'kesalahan tak terduga'}`,
-      );
+      await reply(sock, message.raw, `❌ Gagal: ${userMessage(error)}`);
     } finally {
       inFlight.delete(messageId);
     }
