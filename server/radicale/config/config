@@ -10,5 +10,11 @@ htpasswd_encryption = bcrypt
 [storage]
 filesystem_folder = /data/collections
 
+[web]
+# Matikan web UI. Radicale diakses dari internet lewat Cloudflare Tunnel, dan
+# DAVx5 cuma butuh CalDAV (PROPFIND/REPORT), bukan halaman /.web. Koleksi
+# "Reminder" sudah dibuat, jadi UI tidak diperlukan lagi.
+type = none
+
 [logging]
 level = info
