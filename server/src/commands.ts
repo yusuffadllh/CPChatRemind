@@ -22,7 +22,13 @@ const ALIASES: Record<string, CommandName> = {
   '/bantuan': 'bantuan',
   '/help': 'bantuan',
   '/menu': 'bantuan',
+  '/start': 'bantuan',
+  '/mulai': 'bantuan',
+  '/?': 'bantuan',
 };
+
+/** Perintah yang ditawarkan saat pengguna salah tulis. Alias tidak perlu ikut. */
+const SUGGESTED = ['/list', '/cari', '/agenda', '/bantuan'] as const;
 
 export interface Command {
   name: CommandName;
@@ -39,6 +45,26 @@ export function parseCommand(text: string): Command | null {
   if (!name) return null;
 
   return { name, argument: rest.join(' ').trim() };
+}
+
+/**
+ * Teks diawali "/" tapi bukan perintah apa pun dan bukan kata kunci simpan.
+ * Tanpa ini pesan salah tulis hilang tanpa jawaban sama sekali.
+ */
+export function unknownCommandHint(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('/')) return null;
+
+  const head = (trimmed.split(/\s+/)[0] ?? '').toLowerCase();
+  if (ALIASES[head] || config.KEYWORDS.includes(head)) return null;
+
+  const known = [...new Set([...config.KEYWORDS, ...SUGGESTED])];
+  const guess = known.find((item) => item.startsWith(head) || head.startsWith(item));
+
+  return [
+    `🤷 Perintah \`${head}\` tidak dikenal.`,
+    guess ? `Maksudnya \`${guess}\`?` : 'Kirim `/bantuan` untuk lihat semua perintah.',
+  ].join(' ');
 }
 
 function formatMoment(iso: string): string {
@@ -90,32 +116,60 @@ function newestFirst(notes: Note[]): Note[] {
 
 function helpText(): string {
   const write = config.KEYWORDS.map((keyword) => `\`${keyword}\``).join(' / ');
+  const primary = config.KEYWORDS[0] ?? '/catat';
   const fallback =
     config.REMINDER_MINUTES_BEFORE > 0
       ? `${formatLead(config.REMINDER_MINUTES_BEFORE)} sebelum acara`
       : 'tepat saat acara mulai';
 
   return [
-    '🤖 *wa-reminder*',
+    '🤖 *wa-reminder* — catatan & pengingat lewat WhatsApp',
     '',
-    `*Simpan* — ${write}`,
-    '`/catat wifi rumah 12345`',
+    config.REQUIRE_KEYWORD
+      ? `Pesan simpan harus diawali ${write}. Isinya bahasa bebas, tidak ada format baku.`
+      : 'Kata kunci sedang dimatikan: semua pesan yang masuk langsung diproses.',
+    '',
+    '*1. Simpan catatan biasa*',
+    `\`${primary} wifi rumah 12345\``,
+    `\`${primary} ide skripsi: deteksi warna pakai HSV\``,
+    'Tanpa waktu = cuma dicatat, tidak masuk kalender.',
+    '',
+    '*2. Buat pengingat*',
     '`/ingatkan besok jam 3 sore meeting tim`',
+    '`/ingatkan sabtu jam 9 servis motor di bengkel Andi`',
+    '`/ingatkan tanggal 17 seharian libur`',
+    'Ada waktunya = masuk kalender HP, lengkap dengan alarm.',
     '',
-    '*Atur jam alarm* — sebut saja di pesannya',
-    '`/ingatkan besok jam 3 rapat, ingetin 2 jam sebelumnya`',
-    '`/ingatkan sabtu jam 9 servis motor, alarm sehari sebelum`',
-    '`/ingatkan jam 8 malam minum obat, pas jamnya`',
+    '*3. Atur jam alarm* — sebut saja di pesannya',
+    '`... ingetin 2 jam sebelumnya`',
+    '`... alarm sehari sebelum`',
+    '`... pas jamnya` → bunyi tepat saat acara mulai',
+    `Kalau tidak disebut, dipakai ${fallback}.`,
     '',
-    '*Lihat*',
+    '*4. Lihat yang sudah tersimpan*',
     '`/list` — 10 catatan terakhir',
     '`/list 25` — sebanyak yang diminta (maks 30)',
-    '`/cari wifi` — cari judul atau isi',
+    '`/cari wifi` — cari di judul & isi',
     '`/agenda` — jadwal yang akan datang',
-    '`/bantuan` — pesan ini',
+    '`/bantuan` — pesan ini (juga `/help`, `/menu`, `/start`)',
     '',
-    'Pesan yang ada waktunya masuk kalender HP lewat DAVx5.',
-    `Kalau alarm tidak disebut, dipakai ${fallback}.`,
+    '*Arti reaksi emoji di pesanmu*',
+    '⏳ sedang diproses · 📅 jadi pengingat · 📝 jadi catatan',
+    '📖 perintah baca · 🤷 diabaikan · ❌ gagal (alasannya dibalas)',
+    '',
+    `🕒 Zona waktu: ${config.TIMEZONE}`,
+    '📱 Pengingat muncul di Kalender HP lewat DAVx5.',
+  ].join('\n');
+}
+
+/** Balasan singkat kalau kata kunci dikirim tanpa isi, mis. hanya "/catat". */
+export function emptyPayloadHint(keyword: string): string {
+  return [
+    `✏️ \`${keyword}\` masih kosong. Tulis isinya setelah kata kunci:`,
+    `\`${keyword} beli beras 5kg\``,
+    '`/ingatkan besok jam 3 sore rapat, ingetin 1 jam sebelumnya`',
+    '',
+    'Kirim `/bantuan` untuk daftar lengkap.',
   ].join('\n');
 }
 

@@ -19,10 +19,15 @@ Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau 
 | `/list` | 10 catatan terakhir; `/list 25` untuk lebih banyak (maks 30) |
 | `/cari wifi` | Cari di judul dan isi catatan |
 | `/agenda` | Event mendatang yang sudah tersimpan |
-| `/bantuan` | Daftar perintah (juga `/help`, `/menu`) |
+| `/bantuan` | Daftar perintah (juga `/help`, `/menu`, `/start`, `/?`) |
 
 Perintah baca dijawab langsung dari `notes.jsonl` tanpa memanggil Gemini, jadi gratis
 dan instan. Reaksi 📖 menandakan perintah baca berhasil dijalankan.
+
+Pesan berawalan `/` yang bukan perintah apa pun dijawab dengan petunjuk singkat
+(plus tebakan kalau ejaannya mirip, mis. `/agend` → `/agenda`), dan kata kunci tanpa
+isi seperti `/catat` saja dibalas contoh pemakaian. Teks biasa tanpa `/` tetap
+diabaikan tanpa balasan supaya obrolan normal tidak terganggu.
 
 ### Mengatur jam alarm
 

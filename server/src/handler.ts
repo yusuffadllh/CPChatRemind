@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import type { WASocket } from 'baileys';
 import { createEvent } from './caldav.js';
-import { parseCommand, runCommand } from './commands.js';
+import {
+  emptyPayloadHint,
+  parseCommand,
+  runCommand,
+  unknownCommandHint,
+} from './commands.js';
 import { config, isWhitelisted } from './config.js';
 import { describeAlarm, normalizeReminder } from './duration.js';
 import { extract, parseLocal } from './gemini.js';
@@ -41,9 +46,20 @@ function userMessage(error: unknown): string {
   return text;
 }
 
-/** Buang prefix kata kunci; null berarti pesan tidak lolos filter. */
-function stripKeyword(text: string): string | null {
-  if (!config.REQUIRE_KEYWORD) return text;
+/** Hasil pembacaan kata kunci di awal pesan. */
+type Payload =
+  | { kind: 'ok'; text: string }
+  /** Kata kunci benar tapi tidak ada isinya, mis. cuma "/catat". */
+  | { kind: 'empty'; keyword: string }
+  /** Bukan untuk bot. */
+  | { kind: 'skip' };
+
+/** Buang prefix kata kunci dari pesan. */
+function stripKeyword(text: string): Payload {
+  if (!config.REQUIRE_KEYWORD) {
+    const trimmed = text.trim();
+    return trimmed.length > 0 ? { kind: 'ok', text: trimmed } : { kind: 'skip' };
+  }
 
   const lower = text.toLowerCase();
   const hit = config.KEYWORDS.find((keyword) => {
@@ -52,11 +68,11 @@ function stripKeyword(text: string): string | null {
     const next = lower[keyword.length];
     return next === undefined || !/[\p{L}\p{N}]/u.test(next);
   });
-  if (!hit) return null;
+  if (!hit) return { kind: 'skip' };
 
   // Buang pemisah setelah kata kunci, mis. "/catat: beli beras".
   const rest = text.slice(hit.length).replace(/^[\s:,.\-–—]+/u, '').trim();
-  return rest.length > 0 ? rest : null;
+  return rest.length > 0 ? { kind: 'ok', text: rest } : { kind: 'empty', keyword: hit };
 }
 
 export function createHandler(getSocket: () => WASocket) {
@@ -93,7 +109,24 @@ export function createHandler(getSocket: () => WASocket) {
     }
 
     const payload = stripKeyword(message.text);
-    if (!payload) {
+    const sock = getSocket();
+
+    if (payload.kind === 'empty') {
+      await react(sock, message.raw, EMOJI.ignored);
+      await reply(sock, message.raw, emptyPayloadHint(payload.keyword));
+      return;
+    }
+
+    if (payload.kind === 'skip') {
+      // Diawali "/" tapi bukan perintah yang dikenal: kasih petunjuk, jangan
+      // diam saja. Teks biasa tanpa "/" tetap diabaikan tanpa balasan.
+      const hint = unknownCommandHint(message.text);
+      if (hint) {
+        await react(sock, message.raw, EMOJI.ignored);
+        await reply(sock, message.raw, hint);
+        return;
+      }
+
       logger.debug(
         { text: message.text, keywords: config.KEYWORDS },
         'Pesan tidak lolos filter kata kunci',
@@ -103,13 +136,12 @@ export function createHandler(getSocket: () => WASocket) {
 
     inFlight.add(messageId);
 
-    const sock = getSocket();
     const log = logger.child({ from: message.senderPhone });
 
     try {
       await react(sock, message.raw, EMOJI.working);
 
-      const result = await extract(payload, message.senderPhone);
+      const result = await extract(payload.text, message.senderPhone);
       log.debug({ result }, 'Hasil ekstraksi');
 
       // Kata kunci eksplisit = perintah langsung, jadi "ignore" dari Gemini
@@ -122,8 +154,8 @@ export function createHandler(getSocket: () => WASocket) {
       }
 
       const start = parseLocal(result.datetime_start);
-      const title = result.title.trim() || payload.slice(0, 60);
-      const body = result.note?.trim() || payload;
+      const title = result.title.trim() || payload.text.slice(0, 60);
+      const body = result.note?.trim() || payload.text;
 
       // Event tanpa waktu tidak bisa masuk kalender, turunkan jadi catatan.
       if (type === 'event' && start) {
