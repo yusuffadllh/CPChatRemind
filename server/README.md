@@ -15,6 +15,7 @@ Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau 
 | --- | --- |
 | `/catat wifi rumah 12345` | Simpan catatan (juga `/note`) |
 | `/ingatkan besok jam 3 sore rapat` | Buat event + alarm di kalender HP |
+| `/ingatkan besok jam 3 rapat, ingetin 2 jam sebelumnya` | Sama, tapi jam alarmnya diatur sendiri |
 | `/list` | 10 catatan terakhir; `/list 25` untuk lebih banyak (maks 30) |
 | `/cari wifi` | Cari di judul dan isi catatan |
 | `/agenda` | Event mendatang yang sudah tersimpan |
@@ -22,6 +23,21 @@ Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, atau 
 
 Perintah baca dijawab langsung dari `notes.jsonl` tanpa memanggil Gemini, jadi gratis
 dan instan. Reaksi 📖 menandakan perintah baca berhasil dijalankan.
+
+### Mengatur jam alarm
+
+Waktu alarm ikut apa yang ditulis di pesan, tidak harus 30 menit terus:
+
+| Ditulis di pesan | Alarm |
+| --- | --- |
+| `ingetin 15 menit sebelum` | 15 menit sebelum acara |
+| `ingetin 2 jam sebelumnya` | 2 jam sebelum acara |
+| `alarm sehari sebelum` | 1 hari sebelum acara |
+| `pas jamnya` / `tepat waktu` | Tepat saat acara mulai |
+| (tidak disebut) | Nilai `REMINDER_MINUTES_BEFORE` di `.env` |
+
+Batas atas 7 hari (10080 menit). Balasan bot selalu menyebut alarm yang dipakai,
+jadi kalau Gemini salah tangkap langsung kelihatan.
 
 ## Prasyarat
 
@@ -226,7 +242,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | Key | Default | Arti |
 | --- | --- | --- |
 | `TIMEZONE` | `Asia/Jakarta` | Dipakai untuk resolusi "besok", "sore", dll. |
-| `REMINDER_MINUTES_BEFORE` | `30` | Menit alarm sebelum event; `0` = tanpa alarm |
+| `REMINDER_MINUTES_BEFORE` | `30` | Alarm cadangan, dipakai hanya kalau pesan tidak menyebut sendiri. `0` = tepat saat acara mulai. Maks `10080` (7 hari) |
 
 **CalDAV**
 

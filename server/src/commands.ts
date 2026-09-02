@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import { config } from './config.js';
+import { describeAlarm, formatLead } from './duration.js';
 import { readNotes, type Note } from './notes.js';
 
 /** Batas baris supaya balasan WhatsApp tidak jadi tembok teks. */
@@ -59,6 +60,10 @@ function renderNote(index: number, note: Note): string {
       : `   🕒 ${formatMoment(note.createdAt)}`,
   );
 
+  if (note.eventStart && note.reminderMinutes !== undefined) {
+    rows.push(`   ${describeAlarm(note.reminderMinutes)}`);
+  }
+
   const body = preview(note.body);
   if (body && body.toLowerCase() !== note.title.trim().toLowerCase()) {
     rows.push(`   ${body}`);
@@ -85,10 +90,10 @@ function newestFirst(notes: Note[]): Note[] {
 
 function helpText(): string {
   const write = config.KEYWORDS.map((keyword) => `\`${keyword}\``).join(' / ');
-  const alarm =
+  const fallback =
     config.REMINDER_MINUTES_BEFORE > 0
-      ? `dialarmkan ${config.REMINDER_MINUTES_BEFORE} menit sebelumnya`
-      : 'tanpa alarm awal';
+      ? `${formatLead(config.REMINDER_MINUTES_BEFORE)} sebelum acara`
+      : 'tepat saat acara mulai';
 
   return [
     '🤖 *wa-reminder*',
@@ -97,6 +102,11 @@ function helpText(): string {
     '`/catat wifi rumah 12345`',
     '`/ingatkan besok jam 3 sore meeting tim`',
     '',
+    '*Atur jam alarm* — sebut saja di pesannya',
+    '`/ingatkan besok jam 3 rapat, ingetin 2 jam sebelumnya`',
+    '`/ingatkan sabtu jam 9 servis motor, alarm sehari sebelum`',
+    '`/ingatkan jam 8 malam minum obat, pas jamnya`',
+    '',
     '*Lihat*',
     '`/list` — 10 catatan terakhir',
     '`/list 25` — sebanyak yang diminta (maks 30)',
@@ -104,7 +114,8 @@ function helpText(): string {
     '`/agenda` — jadwal yang akan datang',
     '`/bantuan` — pesan ini',
     '',
-    `Pesan yang ada waktunya masuk kalender HP lewat DAVx5 dan ${alarm}.`,
+    'Pesan yang ada waktunya masuk kalender HP lewat DAVx5.',
+    `Kalau alarm tidak disebut, dipakai ${fallback}.`,
   ].join('\n');
 }
 

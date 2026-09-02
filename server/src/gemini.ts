@@ -11,6 +11,8 @@ export const extractionSchema = z.object({
   all_day: z.boolean().default(false),
   location: z.string().nullish(),
   note: z.string().nullish(),
+  /** Menit sebelum acara untuk alarm; null = pakai default dari .env. */
+  reminder_minutes_before: z.number().nullish(),
   confidence: z.number().min(0).max(1).default(0),
 });
 
@@ -37,8 +39,14 @@ Aturan:
    "malam" 19:00.
 5. "datetime_end" opsional; kalau durasi tidak jelas biarkan null.
 6. "all_day" true hanya kalau jelas acara sepanjang hari.
-7. "note" berisi detail lengkap. Untuk type "note" wajib terisi.
-8. "confidence" 0.0-1.0 sesuai keyakinanmu.
+7. "reminder_minutes_before" = berapa MENIT sebelum acara alarm berbunyi, hanya
+   kalau pengguna menyebutnya. Kalau tidak disebut, isi null.
+   Contoh: "ingetin 1 jam sebelumnya" -> 60. "alarm 2 hari sebelum" -> 2880.
+   "ingetin 15 menit sebelum" -> 15. "pas jamnya" / "tepat waktu" -> 0.
+   "besok jam 3, ingetkan pagi harinya" -> hitung selisih menit dari waktu acara.
+   Jangan mengarang angka kalau pesan tidak menyebut soal alarm.
+8. "note" berisi detail lengkap. Untuk type "note" wajib terisi.
+9. "confidence" 0.0-1.0 sesuai keyakinanmu.
 `.trim();
 
 const responseSchema = {
@@ -51,6 +59,7 @@ const responseSchema = {
     all_day: { type: Type.BOOLEAN },
     location: { type: Type.STRING, nullable: true },
     note: { type: Type.STRING, nullable: true },
+    reminder_minutes_before: { type: Type.NUMBER, nullable: true },
     confidence: { type: Type.NUMBER },
   },
   required: ['type', 'title', 'confidence'],

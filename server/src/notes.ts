@@ -10,6 +10,8 @@ export interface Note {
   createdAt: string;
   eventUid?: string;
   eventStart?: string;
+  /** Menit alarm sebelum event; hanya ada di catatan yang punya eventStart. */
+  reminderMinutes?: number;
 }
 
 const filePath = join(config.DATA_DIR, 'notes.jsonl');

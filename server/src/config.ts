@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
+import { MAX_REMINDER_MINUTES } from './duration.js';
 
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
@@ -25,7 +26,8 @@ const schema = z.object({
     .transform((value) => csv(value).map((item) => item.toLowerCase())),
 
   TIMEZONE: z.string().default('Asia/Jakarta'),
-  REMINDER_MINUTES_BEFORE: z.coerce.number().int().min(0).max(1440).default(30),
+  /** Dipakai kalau pesan tidak menyebut sendiri mau diingatkan berapa lama sebelumnya. */
+  REMINDER_MINUTES_BEFORE: z.coerce.number().int().min(0).max(MAX_REMINDER_MINUTES).default(30),
 
   CALDAV_URL: z.string().url('CALDAV_URL harus URL lengkap, contoh http://localhost:5232/'),
   CALDAV_USERNAME: z.string().min(1),

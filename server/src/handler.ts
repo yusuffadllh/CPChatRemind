@@ -4,6 +4,7 @@ import type { WASocket } from 'baileys';
 import { createEvent } from './caldav.js';
 import { parseCommand, runCommand } from './commands.js';
 import { config, isWhitelisted } from './config.js';
+import { describeAlarm, normalizeReminder } from './duration.js';
 import { extract, parseLocal } from './gemini.js';
 import { logger } from './logger.js';
 import { saveNote } from './notes.js';
@@ -112,6 +113,10 @@ export function createHandler(getSocket: () => WASocket) {
 
       // Event tanpa waktu tidak bisa masuk kalender, turunkan jadi catatan.
       if (type === 'event' && start) {
+        // Menit alarm: ikuti pesan kalau disebut, kalau tidak pakai default .env.
+        const reminderMinutes =
+          normalizeReminder(result.reminder_minutes_before) ?? config.REMINDER_MINUTES_BEFORE;
+
         const uid = await createEvent({
           title,
           description: `${body}\n\n— dari WhatsApp: ${message.senderPhone}`,
@@ -119,6 +124,7 @@ export function createHandler(getSocket: () => WASocket) {
           start,
           end: parseLocal(result.datetime_end),
           allDay: result.all_day,
+          reminderMinutes,
         });
 
         await saveNote({
@@ -129,18 +135,17 @@ export function createHandler(getSocket: () => WASocket) {
           createdAt: DateTime.now().setZone(config.TIMEZONE).toISO() ?? '',
           eventUid: uid,
           eventStart: start.toISO() ?? '',
+          reminderMinutes,
         });
 
         await react(sock, message.raw, EMOJI.event);
         await reply(
           sock,
           message.raw,
-          `📅 *${title}*\n${start.setZone(config.TIMEZONE).setLocale('id').toFormat('ccc, dd LLL yyyy • HH:mm')}` +
-            (config.REMINDER_MINUTES_BEFORE > 0
-              ? `\n🔔 diingatkan ${config.REMINDER_MINUTES_BEFORE} menit sebelumnya`
-              : ''),
+          `📅 *${title}*\n${start.setZone(config.TIMEZONE).setLocale('id').toFormat('ccc, dd LLL yyyy • HH:mm')}\n` +
+            describeAlarm(reminderMinutes),
         );
-        log.info({ title }, 'Event dibuat');
+        log.info({ title, reminderMinutes }, 'Event dibuat');
         return;
       }
 

@@ -68,6 +68,8 @@ export interface EventInput {
   start: DateTime;
   end?: DateTime | null | undefined;
   allDay: boolean;
+  /** Menit alarm sebelum acara. 0 = tepat saat mulai. */
+  reminderMinutes: number;
 }
 
 /** @returns UID event yang dibuat. */
@@ -87,12 +89,11 @@ export async function createEvent(input: EventInput): Promise<string> {
     location: input.location,
   });
 
-  if (config.REMINDER_MINUTES_BEFORE > 0) {
-    event.createAlarm({
-      type: ICalAlarmType.display,
-      triggerBefore: config.REMINDER_MINUTES_BEFORE * 60,
-    });
-  }
+  // triggerBefore 0 valid (TRIGGER:PT0S) = alarm tepat saat acara mulai.
+  event.createAlarm({
+    type: ICalAlarmType.display,
+    triggerBefore: input.reminderMinutes * 60,
+  });
 
   const client = await getClient();
   const target = await getCalendar();
