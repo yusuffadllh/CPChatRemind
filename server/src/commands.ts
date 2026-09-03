@@ -147,63 +147,36 @@ function helpText(): string {
   const primary = config.KEYWORDS[0] ?? '/catat';
   const fallback =
     config.REMINDER_MINUTES_BEFORE > 0
-      ? `${formatLead(config.REMINDER_MINUTES_BEFORE)} sebelum acara`
-      : 'tepat saat acara mulai';
+      ? `alarm ${formatLead(config.REMINDER_MINUTES_BEFORE)} sebelum acara`
+      : 'alarm tepat saat acara mulai';
 
   return [
-    '🤖 *wa-reminder* — catatan & pengingat lewat WhatsApp',
+    '🤖 *wa-reminder* — catatan, kalender & pengingat tugas',
     '',
     config.REQUIRE_KEYWORD
-      ? `Pesan simpan harus diawali ${write}. Isinya bahasa bebas, tidak ada format baku.`
+      ? `Awali pesan dengan ${write}. Isinya bahasa bebas, tidak ada format baku.`
       : 'Kata kunci sedang dimatikan: semua pesan yang masuk langsung diproses.',
     '',
-    '*1. Simpan catatan biasa*',
-    `\`${primary} wifi rumah 12345\``,
-    `\`${primary} ide skripsi: deteksi warna pakai HSV\``,
-    'Tanpa waktu = cuma dicatat, tidak masuk kalender.',
+    `📝 \`${primary} wifi rumah 12345\``,
+    '   Tanpa waktu → cuma dicatat.',
     '',
-    '*2. Buat pengingat*',
-    '`/ingatkan besok jam 3 sore meeting tim`',
-    '`/ingatkan sabtu jam 9 servis motor di bengkel Andi`',
-    '`/ingatkan tanggal 17 seharian libur`',
-    'Ada waktunya = masuk kalender HP, lengkap dengan alarm.',
+    '📅 `/ingatkan besok jam 3 sore meeting tim`',
+    `   Ada waktu → masuk Kalender HP, ${fallback}.`,
+    '   Atur sendiri: `ingetin 2 jam sebelumnya`, `alarm sehari sebelum`, `pas jamnya`.',
     '',
-    '*3. Atur jam alarm* — sebut saja di pesannya',
-    '`... ingetin 2 jam sebelumnya`',
-    '`... alarm sehari sebelum`',
-    '`... pas jamnya` → bunyi tepat saat acara mulai',
-    `Kalau tidak disebut, dipakai ${fallback}.`,
+    `🎯 \`${TASK_KEYWORD} laporan PCV bikin game HSV, deadline 20 Oktober\``,
+    '   Tidak masuk kalender — bot yang nge-WA kamu beberapa kali sebelum tenggat,',
+    '   jaraknya ikut taksiran kesulitan tugasnya. Boleh beberapa baris sekaligus.',
+    '   Tenggat wajib ada tanggalnya, “deadline UTS” saja belum bisa dijadwalkan.',
     '',
-    '*4. Pengingat tugas* — bot yang nge-WA kamu',
-    `\`${TASK_KEYWORD} project PCV bikin game HSV, deadline 20 Oktober\``,
-    'Boleh beberapa baris sekaligus, tulis apa adanya:',
-    `\`${TASK_KEYWORD} Project PCV\` / \`Bikin game berbasis HSV\` / \`Push ke GitHub + README\` / \`Deadline 20 Okt\``,
-    'Bedanya dengan `/ingatkan`: ini *tidak* masuk kalender, tapi bot yang',
-    'mengirim pesan WA ke kamu beberapa kali sebelum tenggat.',
-    'Jarak pengingatnya dihitung dari taksiran kesulitan tugasnya.',
-    'Tenggat wajib ada tanggalnya — “deadline UTS” saja belum bisa dijadwalkan.',
+    `💾 Foto/video + keterangan \`${MEDIA_KEYWORD} struk belanja\` (maks ${config.MEDIA_MAX_MB} MB)`,
+    `   Hanya \`${MEDIA_KEYWORD}\` yang menyimpan berkasnya; kata kunci lain cuma mencatat teksnya.`,
+    `   Foto lama juga bisa: balas fotonya lalu tulis \`${MEDIA_KEYWORD}\`.`,
     '',
-    '*5. Simpan foto / video*',
-    `Hanya \`${MEDIA_KEYWORD}\` yang menyimpan berkasnya ke server, dan hanya foto & video.`,
-    `Kirim fotonya dengan keterangan \`${MEDIA_KEYWORD} struk belanja bulan ini\`.`,
-    `Keterangan boleh cuma kata kuncinya saja, mis. \`${MEDIA_KEYWORD}\`.`,
-    `Foto lama juga bisa: balas fotonya lalu tulis \`${MEDIA_KEYWORD}\`.`,
-    `Maks ${config.MEDIA_MAX_MB} MB; lokasi berkasnya dibalas ke kamu.`,
-    `Kata kunci lain (mis. \`${primary}\`) cuma mencatat keterangannya, berkasnya tidak disimpan.`,
+    '📖 `/list` · `/list 25` · `/cari wifi` · `/agenda` · `/bantuan`',
     '',
-    '*6. Lihat yang sudah tersimpan*',
-    '`/list` — 10 catatan terakhir',
-    '`/list 25` — sebanyak yang diminta (maks 30)',
-    '`/cari wifi` — cari di judul & isi',
-    '`/agenda` — jadwal yang akan datang',
-    '`/bantuan` — pesan ini (juga `/help`, `/menu`, `/start`)',
-    '',
-    '*Arti reaksi emoji di pesanmu*',
-    '⏳ sedang diproses · 📅 jadi pengingat · 🎯 jadi tugas · 📝 jadi catatan',
-    '💾 berkas tersimpan · 📖 perintah baca · 🤷 diabaikan · ❌ gagal',
-    '',
-    `🕒 Zona waktu: ${config.TIMEZONE}`,
-    '📱 Pengingat muncul di Kalender HP lewat DAVx5.',
+    'Reaksi: ⏳ diproses · 📅 kalender · 🎯 tugas · 📝 catatan · 💾 berkas · 📖 baca · 🤷 dilewat · ❌ gagal',
+    `🕒 ${config.TIMEZONE} · event kalender sampai ke HP lewat DAVx5.`,
   ].join('\n');
 }
 
