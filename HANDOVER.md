@@ -10,7 +10,7 @@ Repo: <https://github.com/yusuffadllh/CPChatRemind> (branch `main`)
 ---
 
 ## 1. Apa yang diminta user
-
+\
 User ingin sistem yang membaca pesan WhatsApp miliknya sendiri, lalu otomatis:
 
 - dicatat sebagai **catatan**, atau

@@ -10,11 +10,11 @@ import {
 } from './commands.js';
 import { config, isWhitelisted, MEDIA_KEYWORD, TASK_KEYWORD } from './config.js';
 import { describeAlarm, formatLead, normalizeReminder } from './duration.js';
-import { estimateDifficulty, extract, parseLocal } from './gemini.js';
+import { estimateDifficulty, extract, parseLocal, readDeadlineAnswer, toReminderRule } from './gemini.js';
 import { logger } from './logger.js';
 import { formatBytes, mediaTitle, saveMedia, type Attachment } from './media.js';
 import { saveNote } from './notes.js';
-import { buildTask, saveTask, type Task } from './tasks.js';
+import { buildTask, saveTask, type ReminderRule, type Task } from './tasks.js';
 import { formatMoment } from './time.js';
 import { react, reply, type IncomingMessage } from './whatsapp.js';
 
@@ -31,6 +31,47 @@ const EMOJI = {
 
 /** Pesan yang sedang diproses, biar kiriman ganda tidak dobel dikerjakan. */
 const inFlight = new Set<string>();
+
+/**
+ * Tugas yang menunggu jawaban konfirmasi tenggat. Sesi kedaluwarsa sendiri
+ * setelah beberapa jam supaya tidak menumpuk.
+ */
+interface PendingDeadline {
+  jid: string;
+  senderPhone: string;
+  title: string;
+  body: string;
+  attachment?: Attachment;
+  askedAt: number;
+}
+const pendingDeadlines = new Map<string, PendingDeadline>();
+const PENDING_TIMEOUT_MS = 6 * 60 * 60 * 1000;
+
+function cleanupPending(): void {
+  const cutoff = Date.now() - PENDING_TIMEOUT_MS;
+  for (const [key, session] of pendingDeadlines) {
+    if (session.askedAt < cutoff) pendingDeadlines.delete(key);
+  }
+}
+
+/** Pertanyaan lanjutan kalau tenggat tugas tidak jelas atau sudah lewat. */
+function askDeadlineHint(title: string, overdue: boolean): string {
+  return [
+    `📝 *${title}*`,
+    overdue
+      ? 'Tenggatnya sudah lewat, jadi belum ada pengingat yang kujadwalkan.'
+      : 'Tenggatnya belum bisa dijadwalkan karena tidak ada tanggal pastinya.',
+    '',
+    'Tenggatnya kapan? Balas pakai `/tugas`, contoh:',
+    `\`${TASK_KEYWORD} deadline 20 Oktober jam 5 sore\``,
+    '',
+    'Boleh sekalian minta pola pengingatnya, contoh:',
+    `\`${TASK_KEYWORD} deadline Jumat, ingetin tiap jam\``,
+    `\`${TASK_KEYWORD} deadline 20 Okt, tiap hari jam 8 pagi\``,
+    '',
+    'Atau kirim `' + TASK_KEYWORD + ' skip` kalau tidak perlu pengingat.',
+  ].join('\n');
+}
 
 function isAllowed(message: IncomingMessage): boolean {
   if (message.isSelfChat) return config.ALLOW_SELF_CHAT;
@@ -102,6 +143,11 @@ function attachmentLine(attachment: Attachment, quoted = false): string {
 
 /** Ringkasan tugas + daftar jadwal pengingatnya, biar salah taksir langsung kelihatan. */
 function taskSummary(task: Task): string {
+  const ruleNote =
+    task.reminderRule && task.reminderRule.intervalMinutes
+      ? '\n_(ikut permintaanmu, bukan taksiran AI)_'
+      : '';
+
   const head = [
     `🎯 *${task.title}*`,
     `⏰ Tenggat ${formatMoment(task.deadline)}`,
@@ -110,7 +156,7 @@ function taskSummary(task: Task): string {
   ].join('\n');
 
   const schedule = [
-    `🔔 Aku bakal WA kamu ${task.layers.length}×:`,
+    `🔔 Aku bakal WA kamu ${task.layers.length}×:${ruleNote}`,
     ...task.layers.map(
       (layer) => `• ${formatMoment(layer.fireAt)} (${formatLead(layer.minutesBefore)} sebelum)`,
     ),
@@ -124,18 +170,67 @@ function taskSummary(task: Task): string {
 }
 
 /** Tugas tanpa tanggal pasti tidak bisa dijadwalkan; jangan mengarang tanggalnya. */
-function vagueDeadlineHint(title: string): string {
-  return [
-    `📝 *${title}*`,
-    'Sudah kucatat, tapi tenggatnya belum bisa dijadwalkan karena tidak ada tanggal pastinya.',
-    '',
-    `Kirim ulang pakai \`${TASK_KEYWORD}\` begitu tanggalnya jelas, contoh:`,
-    `\`${TASK_KEYWORD} project PCV deteksi HSV, deadline 20 Oktober\``,
-    `\`${TASK_KEYWORD} laporan praktikum, dikumpul Jumat depan jam 5 sore\``,
-  ].join('\n');
+/**
+ * Balasan konfirmasi hanya diproses kalau diawali /tugas, biar tidak menelan pesan lain.
+ */
+function takePendingDeadline(
+  message: IncomingMessage,
+): { session: PendingDeadline; answer: string } | null {
+  cleanupPending();
+  const text = message.text.trim();
+  if (!text.toLowerCase().startsWith('/tugas')) return null;
+  const key = `${message.senderPhone}:${message.jid}`;
+  const session = pendingDeadlines.get(key);
+  if (!session) return null;
+
+  const answer = text.replace(/^\/tugas\b/i, '').trim();
+  // Isi kosong tidak menghabiskan sesi; biarkan jatuh ke petunjuk /tugas kosong.
+  if (!answer) return null;
+
+  pendingDeadlines.delete(key);
+  return { session, answer };
 }
 
 export function createHandler(getSocket: () => WASocket) {
+  /**
+   * Simpan tugas baru (catatan + jadwal) lalu susun ringkasannya.
+   * Dipakai jalur utama dan jalur konfirmasi tenggat; pengirimannya tetap di
+   * handle() supaya reaksi dan balasan nempel ke pesan yang benar.
+   */
+  async function scheduleTask(input: {
+    noteId: string;
+    jid: string;
+    title: string;
+    body: string;
+    deadline: DateTime;
+    reminderRule?: ReminderRule;
+  }): Promise<Task> {
+    const estimate = await estimateDifficulty(input.title, input.body);
+    const task = buildTask({
+      noteId: input.noteId,
+      jid: input.jid,
+      title: input.title,
+      body: input.body,
+      deadline: input.deadline,
+      difficulty: estimate.difficulty,
+      workMinutes: estimate.work_minutes,
+      reason: estimate.reason,
+      reminderRule: input.reminderRule,
+    });
+    await saveTask(task);
+    logger.info(
+      {
+        title: task.title,
+        deadline: task.deadline,
+        difficulty: task.difficulty,
+        layers: task.layers.length,
+        rule: Boolean(input.reminderRule),
+      },
+      'Tugas dijadwalkan',
+    );
+    return task;
+  }
+
   return async function handle(message: IncomingMessage): Promise<void> {
     if (!isAllowed(message)) {
       logger.debug(
@@ -147,6 +242,80 @@ export function createHandler(getSocket: () => WASocket) {
 
     const messageId = message.raw.key.id;
     if (!messageId || inFlight.has(messageId)) return;
+
+    // Jawaban atas pertanyaan "tenggatnya kapan?" diproses lebih dulu supaya
+    // tidak dianggap tugas baru. Harus diawali /tugas dan ada sesi menunggu.
+    const pending = takePendingDeadline(message);
+    if (pending) {
+      inFlight.add(messageId);
+      const log = logger.child({ from: message.senderPhone });
+      const sock = getSocket();
+      try {
+        await react(sock, message.raw, EMOJI.working);
+
+        // "skip": pengguna tidak mau melanjutkan pengingatnya.
+        if (/\bskip\b/i.test(pending.answer)) {
+          await react(sock, message.raw, EMOJI.ignored);
+          await reply(sock, message.raw, '👌 Oke, pengingatnya tidak kujadwalkan.');
+          log.info('Konfirmasi tenggat dilewati pengguna');
+          return;
+        }
+
+        const answer = await readDeadlineAnswer(pending.session.body, pending.answer);
+        const deadline = parseLocal(answer.datetime_start);
+        const rule = toReminderRule(answer.task_reminder_rule);
+
+        if (!deadline || deadline <= DateTime.now().setZone(config.TIMEZONE)) {
+          // Masih tidak jelas: sesi sudah dihapus di atas, sesi baru dibuat
+          // supaya pengguna bisa mencoba lagi dengan jawaban lain.
+          pendingDeadlines.set(`${message.senderPhone}:${message.jid}`, {
+            ...pending.session,
+            askedAt: Date.now(),
+          });
+          await react(sock, message.raw, EMOJI.note);
+          await reply(
+            sock,
+            message.raw,
+            [
+              `🤔 Belum kebaca tanggal pastinya dari "${pending.answer}".`,
+              askDeadlineHint(pending.session.title, true),
+            ].join('\n\n'),
+          );
+          return;
+        }
+
+        const noteId = randomUUID();
+        await saveNote({
+          id: noteId,
+          title: pending.session.title,
+          body: pending.session.body,
+          sender: message.senderPhone,
+          createdAt: DateTime.now().setZone(config.TIMEZONE).toISO() ?? '',
+          eventStart: deadline.toISO() ?? '',
+          ...(pending.session.attachment ? { attachment: pending.session.attachment } : {}),
+        });
+
+        const task = await scheduleTask({
+          noteId,
+          jid: pending.session.jid,
+          title: pending.session.title,
+          body: pending.session.body,
+          deadline,
+          ...(rule ? { reminderRule: rule } : {}),
+        });
+
+        await react(sock, message.raw, EMOJI.task);
+        await reply(sock, message.raw, taskSummary(task));
+        log.info({ deadline: task.deadline }, 'Tugas dijadwalkan dari jawaban konfirmasi');
+      } catch (error) {
+        log.error({ err: error }, 'Gagal memproses jawaban tenggat');
+        await react(sock, message.raw, EMOJI.failed);
+        await reply(sock, message.raw, `❌ Gagal: ${userMessage(error)}`);
+      } finally {
+        inFlight.delete(messageId);
+      }
+      return;
+    }
 
     // Perintah baca (/list, /cari, /agenda, /bantuan) dijawab tanpa lewat Gemini.
     const command = parseCommand(message.text);
@@ -250,6 +419,10 @@ export function createHandler(getSocket: () => WASocket) {
       const result = await extract(payload.text, message.senderPhone);
       log.debug({ result }, 'Hasil ekstraksi');
 
+      // Aturan pengingat yang pengguna minta eksplisit, mis. "ingetin tiap jam".
+      // Hanya berlaku di jalur tugas; /catat dan /ingatkan tidak berubah.
+      const requestedRule = toReminderRule(result.task_reminder_rule);
+
       // Jalur tugas hanya dibuka oleh kata kuncinya sendiri. Tanpa itu, "task"
       // dari Gemini diperlakukan seperti biasa supaya /catat dan /ingatkan tidak
       // berubah perilaku.
@@ -277,50 +450,66 @@ export function createHandler(getSocket: () => WASocket) {
       if (type === 'task') {
         const noteId = randomUUID();
         const deadlinePassed = start ? start <= DateTime.now().setZone(config.TIMEZONE) : false;
+        const rule = wantsTask ? requestedRule : undefined;
 
-        await saveNote({
-          id: noteId,
-          title,
-          body,
-          sender: message.senderPhone,
-          createdAt: DateTime.now().setZone(config.TIMEZONE).toISO() ?? '',
-          ...(start ? { eventStart: start.toISO() ?? '' } : {}),
-          ...(attachment ? { attachment } : {}),
-        });
-
-        // Tanpa tanggal pasti (mis. "deadline UTS") pengingat tidak bisa
-        // dijadwalkan, dan mengarang tanggal lebih berbahaya daripada bertanya.
+        // Tenggat tidak jelas atau sudah lewat: simpan catatannya lalu tanya
+        // langsung lewat chat. Jawabannya (yang juga diawali /tugas) diproses
+        // jadi tugas beneran.
         if (!start || deadlinePassed) {
+          await saveNote({
+            id: noteId,
+            title,
+            body,
+            sender: message.senderPhone,
+            createdAt: DateTime.now().setZone(config.TIMEZONE).toISO() ?? '',
+            ...(start ? { eventStart: start.toISO() ?? '' } : {}),
+            ...(attachment ? { attachment } : {}),
+          });
+
+          pendingDeadlines.set(`${message.senderPhone}:${message.jid}`, {
+            jid: message.jid,
+            senderPhone: message.senderPhone,
+            title,
+            body,
+            ...(attachment ? { attachment } : {}),
+            askedAt: Date.now(),
+          });
+
           await react(sock, message.raw, EMOJI.note);
           await reply(
             sock,
             message.raw,
             [
-              deadlinePassed
-                ? `\u26a0\ufe0f *${title}*\nTenggatnya sudah lewat (${formatMoment(start?.toISO() ?? '')}), jadi tidak ada pengingat yang dijadwalkan.`
-                : vagueDeadlineHint(title),
+              askDeadlineHint(title, deadlinePassed),
               attachment ? attachmentLine(attachment, message.media?.quoted) : '',
               mediaWarning ?? '',
             ]
               .filter((line) => line.length > 0)
               .join('\n'),
           );
-          log.info({ title, deadlinePassed }, 'Tugas dicatat tanpa jadwal pengingat');
+          log.info({ title, deadlinePassed }, 'Menunggu jawaban tenggat lewat chat');
           return;
         }
 
-        const estimate = await estimateDifficulty(title, body);
-        const task = buildTask({
+        const note = {
+          id: noteId,
+          title,
+          body,
+          sender: message.senderPhone,
+          createdAt: DateTime.now().setZone(config.TIMEZONE).toISO() ?? '',
+          eventStart: start.toISO() ?? '',
+          ...(attachment ? { attachment } : {}),
+        };
+        await saveNote(note);
+
+        const task = await scheduleTask({
           noteId,
           jid: message.jid,
           title,
           body,
           deadline: start,
-          difficulty: estimate.difficulty,
-          workMinutes: estimate.work_minutes,
-          reason: estimate.reason,
+          ...(rule ? { reminderRule: rule } : {}),
         });
-        await saveTask(task);
 
         await react(sock, message.raw, EMOJI.task);
         await reply(
@@ -333,15 +522,6 @@ export function createHandler(getSocket: () => WASocket) {
           ]
             .filter((line) => line.length > 0)
             .join('\n'),
-        );
-        log.info(
-          {
-            title,
-            deadline: task.deadline,
-            difficulty: task.difficulty,
-            layers: task.layers.length,
-          },
-          'Tugas dijadwalkan',
         );
         return;
       }

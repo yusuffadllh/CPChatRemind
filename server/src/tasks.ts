@@ -14,6 +14,21 @@ export interface ReminderLayer {
   sentAt?: string;
 }
 
+/**
+ * Aturan pengingat yang diminta pengguna secara eksplisit, mis. lewat
+ * "/tugas xxx ingetin tiap jam" atau jawaban konfirmasi saat tenggat tidak
+ * jelas. Kalau ada, aturan ini dipakai apa adanya dan perencana otomatis
+ * berdasar taksiran kesulitan dilewati.
+ */
+export interface ReminderRule {
+  /** Pengingat berulang tiap N menit sampai tenggat ("tiap jam" = 60). */
+  intervalMinutes?: number;
+  /** Pengingat tiap hari pada jam yang sama, format "HH:mm". */
+  dailyAt?: string;
+  /** Pengingat tambahan sekali, N menit sebelum tenggat. */
+  minutesBefore?: number;
+}
+
 export interface Task {
   id: string;
   /** Catatan asalnya di notes.jsonl, biar bisa ditelusuri. */
@@ -30,6 +45,8 @@ export interface Task {
   reason: string;
   createdAt: string;
   layers: ReminderLayer[];
+  /** Ada kalau pengingatnya mengikuti permintaan pengguna, bukan taksiran AI. */
+  reminderRule?: ReminderRule;
   status: 'active' | 'done';
 }
 
@@ -111,6 +128,13 @@ const START_MULTIPLIER: Record<number, number> = { 1: 2, 2: 2.5, 3: 3, 4: 4, 5: 
 const MAX_LEAD_MINUTES = 30 * 24 * 60;
 
 /**
+ * Pengingat pertama tidak boleh mepet-mepet banget walau taksirannya pendek.
+ * Tugas 15 menit dengan deadline 23.59 tetap diingatkan mulai 5 jam sebelumnya
+ * (sekitar 19.00), bukan cuma setengah jam sebelum tenggat.
+ */
+const MIN_START_LEAD = 5 * 60;
+
+/**
  * Jeda minimum antar lapisan, ikut ukuran tugasnya. Tugas 20 menit tidak perlu
  * jarak 45 menit antar pengingat, tapi tugas berhari-hari perlu.
  */
@@ -132,7 +156,10 @@ export function planLeads(difficulty: number, workMinutes: number): number[] {
   const work = Math.max(Math.round(workMinutes), 5);
   const multiplier = START_MULTIPLIER[level] ?? 3;
 
-  const start = Math.min(Math.round(work * multiplier), MAX_LEAD_MINUTES);
+  const start = Math.min(
+    Math.max(Math.round(work * multiplier), MIN_START_LEAD),
+    MAX_LEAD_MINUTES,
+  );
   const last = finalLead(work);
   // Peluruhan separuh: jaraknya rapat saat tenggat makin dekat.
   const candidates = [start, Math.round(start / 2), Math.round(start / 4), last];
@@ -184,6 +211,75 @@ export function buildLayers(deadline: DateTime, leads: number[]): ReminderLayer[
   }));
 }
 
+// --- Lapisan dari permintaan pengguna ----------------------------------------
+
+/** Pengingat berulang dibatasi biar WA tidak dibanjiri selama tugas berhari-hari. */
+const MAX_REPEAT_LAYERS = 60;
+
+/**
+ * Susun lapisan pengingat dari aturan yang diminta pengguna sendiri
+ * ("ingetin tiap jam", "tiap hari jam 8 pagi", "ingetin 4 jam sebelum").
+ * Aturan eksplisit menimpa hasil taksiran AI.
+ */
+export function buildLayersFromRule(deadline: DateTime, rule: ReminderRule): ReminderLayer[] {
+  const now = DateTime.now().setZone(config.TIMEZONE);
+  const entries: { lead: number; at: DateTime }[] = [];
+
+  // "tiap jam": berulang sampai tenggat, dari waktu sekarang ke depan.
+  if (rule.intervalMinutes && rule.intervalMinutes > 0) {
+    const interval = Math.round(rule.intervalMinutes);
+    const horizon = Math.round(deadline.diff(now, 'minutes').minutes);
+    for (let lead = interval; lead < horizon && entries.length < MAX_REPEAT_LAYERS; lead += interval) {
+      entries.push({ lead, at: deadline.minus({ minutes: lead }) });
+    }
+  }
+
+  // "tiap hari jam 8": semua hari sampai tenggat pada jam yang sama.
+  if (rule.dailyAt) {
+    const [hours, minutes] = rule.dailyAt.split(':').map(Number);
+    if (Number.isFinite(hours) && Number.isFinite(minutes)) {
+      let day = now.startOf('day');
+      while (day <= deadline) {
+        const at = day.set({ hour: hours, minute: minutes, second: 0, millisecond: 0 });
+        if (at > now && at < deadline) {
+          entries.push({ lead: deadline.diff(at, 'minutes').minutes, at });
+        }
+        day = day.plus({ days: 1 });
+      }
+    }
+  }
+
+  // "ingetin 4 jam sebelum deadline": satu pengingat tambahan.
+  if (rule.minutesBefore !== undefined && rule.minutesBefore >= 0) {
+    const at = deadline.minus({ minutes: rule.minutesBefore });
+    if (at > now) {
+      entries.push({ lead: rule.minutesBefore, at });
+    }
+  }
+
+  const seen = new Set<number>();
+  const unique = entries
+    .filter((entry) => {
+      // Pengingat yang berdekatan (dalam 5 menit) dianggap sama; satu saja.
+      const bucket = Math.round(entry.lead / 5);
+      if (seen.has(bucket)) return false;
+      seen.add(bucket);
+      return true;
+    })
+    .sort((a, b) => b.lead - a.lead);
+
+  // Semua waktu pengingat sudah lewat tapi tenggat belum: kirim satu, sekarang.
+  if (unique.length === 0) {
+    return [{ minutesBefore: 0, fireAt: now.toISO() ?? '', status: 'pending' }];
+  }
+
+  return unique.map((entry) => ({
+    minutesBefore: Math.round(entry.lead),
+    fireAt: entry.at.toISO() ?? '',
+    status: 'pending' as const,
+  }));
+}
+
 /** Rakit satu tugas lengkap dengan jadwal pengingatnya. */
 export function buildTask(input: {
   noteId: string;
@@ -194,8 +290,11 @@ export function buildTask(input: {
   difficulty: number;
   workMinutes: number;
   reason: string;
+  reminderRule?: ReminderRule;
 }): Task {
-  const leads = planLeads(input.difficulty, input.workMinutes);
+  const layers = input.reminderRule
+    ? buildLayersFromRule(input.deadline, input.reminderRule)
+    : buildLayers(input.deadline, planLeads(input.difficulty, input.workMinutes));
 
   return {
     id: randomUUID(),
@@ -208,7 +307,8 @@ export function buildTask(input: {
     workMinutes: input.workMinutes,
     reason: input.reason,
     createdAt: nowIso(),
-    layers: buildLayers(input.deadline, leads),
+    layers,
+    ...(input.reminderRule ? { reminderRule: input.reminderRule } : {}),
     status: 'active',
   };
 }

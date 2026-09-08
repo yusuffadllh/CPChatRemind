@@ -3,8 +3,42 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { config } from './config.js';
 import { logger } from './logger.js';
+import type { ReminderRule } from './tasks.js';
 
 const geminiLogger = logger.child({ module: 'gemini' });
+
+/**
+ * Aturan pengingat yang pengguna tulis sendiri di perintah /tugas, mis.
+ * "ingetin tiap jam" atau "tiap hari jam 8 pagi". Kalau terisi, hasil taksiran
+ * AI untuk jadwal pengingat diabaikan.
+ */
+export const taskReminderRuleSchema = z
+  .object({
+    /** Pengingat berulang tiap N menit sampai tenggat ("tiap jam" = 60). */
+    interval_minutes: z.number().int().min(5).max(20160).nullish(),
+    /** Pengingat tiap hari pada jam yang sama, format "HH:mm". */
+    daily_at: z
+      .string()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'harus HH:mm')
+      .nullish(),
+    /** Pengingat tambahan sekali, N menit sebelum tenggat. */
+    minutes_before: z.number().int().min(0).max(43200).nullish(),
+  })
+  .nullish();
+
+/** Terjemahkan skema Gemini jadi aturan internal; null kalau tidak ada. */
+export function toReminderRule(
+  value: z.infer<typeof taskReminderRuleSchema>,
+): ReminderRule | undefined {
+  if (!value) return undefined;
+  const rule: ReminderRule = {};
+  if (value.interval_minutes) rule.intervalMinutes = value.interval_minutes;
+  if (value.daily_at) rule.dailyAt = value.daily_at;
+  if (value.minutes_before !== null && value.minutes_before !== undefined) {
+    rule.minutesBefore = value.minutes_before;
+  }
+  return Object.keys(rule).length > 0 ? rule : undefined;
+}
 
 export const extractionSchema = z.object({
   type: z.enum(['event', 'note', 'task', 'ignore']),
@@ -16,6 +50,8 @@ export const extractionSchema = z.object({
   note: z.string().nullish(),
   /** Menit sebelum acara untuk alarm; null = pakai default dari .env. */
   reminder_minutes_before: z.number().nullish(),
+  /** Aturan pengingat tugas yang diminta pengguna secara eksplisit. */
+  task_reminder_rule: taskReminderRuleSchema.nullish(),
   confidence: z.number().min(0).max(1).default(0),
 });
 
@@ -58,6 +94,13 @@ Aturan:
    "ingetin 15 menit sebelum" -> 15. "pas jamnya" / "tepat waktu" -> 0.
    "besok jam 3, ingetkan pagi harinya" -> hitung selisih menit dari waktu acara.
    Jangan mengarang angka kalau pesan tidak menyebut soal alarm.
+7b. "task_reminder_rule" khusus type "task": isi kalau pengguna SENDIRI
+   meminta pola pengingatnya. Contoh:
+   - "ingetin tiap jam" / "remind every hour" -> interval_minutes: 60.
+   - "tiap 30 menit" -> interval_minutes: 30.
+   - "tiap hari jam 8 pagi" -> daily_at: "08:00". "tiap malem jam 9" -> "21:00".
+   - "ingetin 4 jam sebelum deadline" -> minutes_before: 240.
+   Kalau pesan tidak menyebut pola pengingat sama sekali, isi null.
 8. "note" berisi detail lengkap. Untuk type "note" dan "task" wajib terisi; kalau
    pesannya beberapa baris, pertahankan semua barisnya.
 9. "confidence" 0.0-1.0 sesuai keyakinanmu.
@@ -74,6 +117,15 @@ const responseSchema = {
     location: { type: Type.STRING, nullable: true },
     note: { type: Type.STRING, nullable: true },
     reminder_minutes_before: { type: Type.NUMBER, nullable: true },
+    task_reminder_rule: {
+      type: Type.OBJECT,
+      nullable: true,
+      properties: {
+        interval_minutes: { type: Type.NUMBER, nullable: true },
+        daily_at: { type: Type.STRING, nullable: true },
+        minutes_before: { type: Type.NUMBER, nullable: true },
+      },
+    },
     confidence: { type: Type.NUMBER },
   },
   required: ['type', 'title', 'confidence'],
@@ -156,6 +208,96 @@ export function parseLocal(value: string | null | undefined): DateTime | null {
 }
 
 // --- Taksiran kesulitan tugas ------------------------------------------------
+
+/**
+ * Pembacaan jawaban pengguna atas pertanyaan "tenggatnya kapan?" dari bot.
+ * Skemanya sengaja beda dari ekstraksi biasa supaya konteksnya fokus.
+ */
+export const deadlineAnswerSchema = z.object({
+  /** Tanggal/jam tenggat dari jawaban; null kalau tidak disebut. */
+  datetime_start: z.string().nullish(),
+  /** Aturan pengingat yang muncul di jawaban ("tiap jam" dst). */
+  task_reminder_rule: taskReminderRuleSchema,
+});
+
+export type DeadlineAnswer = z.infer<typeof deadlineAnswerSchema>;
+
+const DEADLINE_ANSWER_PROMPT = `
+Kamu membantu bot WhatsApp membaca JAWABAN pengguna atas pertanyaan soal
+tenggat tugas. Pesan aslinya tidak punya tanggal yang jelas, lalu bot bertanya
+"tenggatnya kapan?" — sekarang pengguna menjawab.
+
+Keluarkan:
+- "datetime_start": tenggat yang disebut di jawaban, format ISO-8601 waktu
+  lokal tanpa offset, contoh 2026-10-20T23:59:00. Resolusikan kata relatif
+  ("besok", "Jumat depan", "tanggal 15") berdasarkan waktu sekarang yang
+  diberikan. Kalau cuma jam tanpa tanggal ("jam 10 malem"), pakai hari ini,
+  atau besok kalau jamnya sudah lewat. Kalau tidak bisa disimpulkan, isi null.
+  Kalau jam tidak disebut pakai 23:59 (asumsi tenggat pengumpulan).
+- "task_reminder_rule": pola pengingat kalau pengguna menyebutnya:
+  "tiap jam" -> interval_minutes 60, "tiap 2 jam" -> 120,
+  "tiap hari jam 8 pagi" -> daily_at "08:00", "jam 9 malem" -> "21:00",
+  "ingetin 4 jam sebelum" -> minutes_before 240.
+  Kalau tidak disebut, kosongkan.
+Jawab hanya JSON sesuai skema.
+`.trim();
+
+const deadlineAnswerResponseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    datetime_start: { type: Type.STRING, nullable: true },
+    task_reminder_rule: {
+      type: Type.OBJECT,
+      nullable: true,
+      properties: {
+        interval_minutes: { type: Type.NUMBER, nullable: true },
+        daily_at: { type: Type.STRING, nullable: true },
+        minutes_before: { type: Type.NUMBER, nullable: true },
+      },
+    },
+  },
+} as const;
+
+/**
+ * Baca jawaban pengguna untuk pertanyaan tenggat. Lempar Error kalau Gemini
+ * gagal; pemanggil bisa menyuruh pengguna mencoba lagi.
+ */
+export async function readDeadlineAnswer(
+  originalMessage: string,
+  answer: string,
+): Promise<DeadlineAnswer> {
+  const now = DateTime.now().setZone(config.TIMEZONE).setLocale('id');
+
+  const prompt = [
+    `Waktu sekarang: ${now.toFormat("cccc, dd LLLL yyyy HH:mm")} (${config.TIMEZONE})`,
+    `Hari ini: ${now.toISODate()}`,
+    '',
+    `Pesan tugas asli dari pengguna:`,
+    '"""',
+    originalMessage,
+    '"""',
+    '',
+    `Jawaban pengguna atas pertanyaan "tenggatnya kapan?":`,
+    '"""',
+    answer,
+    '"""',
+  ].join('\n');
+
+  const response = await ai.models.generateContent({
+    model: config.GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      systemInstruction: DEADLINE_ANSWER_PROMPT,
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      responseSchema: deadlineAnswerResponseSchema,
+    },
+  });
+
+  const text = response.text?.trim();
+  if (!text) throw new Error('Gemini tidak mengembalikan teks');
+  return deadlineAnswerSchema.parse(JSON.parse(text));
+}
 
 export const difficultySchema = z.object({
   /** 1 = sepele (<30 menit), 5 = berat (butuh berhari-hari). */

@@ -167,7 +167,10 @@ function helpText(): string {
     `🎯 \`${TASK_KEYWORD} laporan PCV bikin game HSV, deadline 20 Oktober\``,
     '   Tidak masuk kalender — bot yang nge-WA kamu beberapa kali sebelum tenggat,',
     '   jaraknya ikut taksiran kesulitan tugasnya. Boleh beberapa baris sekaligus.',
-    '   Tenggat wajib ada tanggalnya, “deadline UTS” saja belum bisa dijadwalkan.',
+    '   Mau atur sendiri? Tambahkan polanya di belakang:',
+    `   \`${TASK_KEYWORD} project PCV, deadline 20 Okt, ingetin tiap jam\``,
+    `   \`${TASK_KEYWORD} laporan praktikum, deadline Jumat, tiap hari jam 8 pagi\``,
+    '   Tenggat wajib ada tanggalnya — kalau tidak, bot bakal nanya lewat chat.',
     '',
     `💾 Foto/video + keterangan \`${MEDIA_KEYWORD} struk belanja\` (maks ${config.MEDIA_MAX_MB} MB)`,
     `   Hanya \`${MEDIA_KEYWORD}\` yang menyimpan berkasnya; kata kunci lain cuma mencatat teksnya.`,
@@ -188,8 +191,11 @@ export function emptyPayloadHint(keyword: string): string {
       `\`${keyword} laporan praktikum, dikumpul Jumat jam 5 sore\``,
       `\`${keyword} project PCV bikin game HSV, push GitHub + README, deadline 20 Okt\``,
       '',
-      'Boleh beberapa baris. Tenggatnya harus ada tanggal/harinya biar bisa dijadwalkan.',
-      'Kirim `/bantuan` untuk daftar lengkap.',
+      'Boleh beberapa baris, dan boleh sekalian pola pengingatnya:',
+      `\`${keyword} laporan, deadline Jumat, ingetin tiap jam\``,
+      `\`${keyword} tugas, deadline 20 Okt, tiap hari jam 8 pagi\``,
+      '',
+      'Kalau tenggatnya belum jelas, bot bakal nanya lewat chat. Kirim `/bantuan` untuk daftar lengkap.',
     ].join('\n');
   }
 
