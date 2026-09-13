@@ -8,12 +8,21 @@ import {
   runCommand,
   unknownCommandHint,
 } from './commands.js';
-import { config, isWhitelisted, MEDIA_KEYWORD, TASK_KEYWORD } from './config.js';
+import { config, isWhitelisted, MEDIA_KEYWORD, REMINDER_KEYWORD, TASK_KEYWORD } from './config.js';
 import { describeAlarm, formatLead, normalizeReminder } from './duration.js';
-import { estimateDifficulty, extract, parseLocal, readDeadlineAnswer, toReminderRule } from './gemini.js';
+import { estimateDifficulty, extract, parseLocal, readDeadlineAnswer, readReminderRequest, toReminderRule } from './gemini.js';
 import { logger } from './logger.js';
 import { formatBytes, mediaTitle, saveMedia, type Attachment } from './media.js';
 import { saveNote } from './notes.js';
+import {
+  buildReminder,
+  listActiveReminders,
+  MAX_STOP_DAYS,
+  normalizePattern,
+  saveReminder,
+  updateReminder,
+  type Reminder,
+} from './reminders.js';
 import { buildTask, saveTask, type ReminderRule, type Task } from './tasks.js';
 import { formatMoment } from './time.js';
 import { react, reply, type IncomingMessage } from './whatsapp.js';
@@ -23,6 +32,7 @@ const EMOJI = {
   event: '📅',
   note: '📝',
   task: '🎯',
+  reminder: '⏰',
   ignored: '🤷',
   failed: '❌',
   read: '📖',
@@ -231,6 +241,108 @@ export function createHandler(getSocket: () => WASocket) {
     return task;
   }
 
+  /** Petunjuk penggunaan /inget saat polanya tidak bisa dibaca. */
+  function reminderHint(title?: string): string {
+    return [
+      title ? `🤔 Belum kebaca pola waktunya dari "${title.slice(0, 60)}".` : '',
+      '',
+      'Contoh:',
+      `\`${REMINDER_KEYWORD} minum air tiap 2 jam\``,
+      `\`${REMINDER_KEYWORD} tiap hari jam 6 pagi minum obat\``,
+      `\`${REMINDER_KEYWORD} daftar\` · \`${REMINDER_KEYWORD} batal <nama>\``,
+    ]
+      .filter((line) => line.length > 0)
+      .join('\n');
+  }
+
+  /** Daftar pengingat aktif untuk balasan WhatsApp. */
+  function renderReminders(reminders: Reminder[]): string {
+    if (reminders.length === 0) {
+      return `📭 Tidak ada pengingat rutin yang aktif. Buat baru: \`${REMINDER_KEYWORD} minum air tiap 2 jam\`.`;
+    }
+    const rows = reminders.map((reminder, index) => {
+      const schedule =
+        reminder.pattern.kind === 'interval'
+          ? `tiap ${formatLead(reminder.pattern.intervalMinutes)}`
+          : `tiap hari jam ${reminder.pattern.dailyAt}`;
+      return `${index + 1}. *${reminder.title}* — ${schedule}, berhenti ${formatMoment(reminder.stopAt)}`;
+    });
+    return [`⏰ *${reminders.length} pengingat rutin aktif*`, '', ...rows].join('\n');
+  }
+
+  /**
+   * Proses isi pesan /inget: daftar, batal, atau bikin pengingat baru lewat
+   * Gemini. Jalurnya terpisah dari ekstraksi biasa supaya prompt-nya fokus.
+   */
+  async function handleReminderRequest(text: string, jid: string): Promise<string> {
+    const cancelMatch = /^(batal|stop|hentikan|matikan)\b/i;
+    if (cancelMatch.test(text)) {
+      const query = text.replace(cancelMatch, '').trim();
+      const active = await listActiveReminders();
+      if (!query) return renderReminders(active);
+
+      const hit = matchActiveReminder(active, query);
+      if (!hit) {
+        return [`🤔 Tidak ada pengingat aktif yang cocok dengan "${query}".`, '', renderReminders(active)].join('\n\n');
+      }
+      await updateReminder(hit.id, (item) => {
+        item.status = 'done';
+      });
+      return `🛑 Pengingat *${hit.title}* dihentikan.`;
+    }
+
+    if (/^(daftar|list)\b/i.test(text)) {
+      return renderReminders(await listActiveReminders());
+    }
+
+    const result = await readReminderRequest(text);
+    const title = result.title.trim() || text.slice(0, 60);
+    const body = result.note?.trim() || '';
+    const now = DateTime.now().setZone(config.TIMEZONE);
+
+    const requestedStop = parseLocal(result.datetime_stop);
+    const stop =
+      requestedStop && requestedStop > now
+        ? DateTime.min(requestedStop, now.plus({ days: MAX_STOP_DAYS }))
+        : null;
+    // Tanpa batas yang disebut: seminggu, cukup lama buat kebiasaan baru dan
+    // tidak spam selamanya kalau pengguna lupa menghentikannya.
+    const effectiveStop = stop ?? now.plus({ days: 7 });
+
+    if (result.daily_at && !result.interval_minutes) {
+      const daily = /^([01]\d|2[0-3]):[0-5]\d$/.test(result.daily_at) ? result.daily_at : null;
+      if (!daily) return reminderHint(text);
+
+      const reminder = buildReminder({
+        jid,
+        title,
+        body,
+        pattern: { kind: 'daily', dailyAt: daily },
+        stopAt: effectiveStop,
+      });
+      await saveReminder(reminder);
+      logger.info({ title, dailyAt: daily, stopAt: reminder.stopAt }, 'Pengingat rutin harian dibuat');
+      return reminderSummary(reminder);
+    }
+
+    const normalized = normalizePattern(result.interval_minutes, stop);
+    if (!normalized) return reminderHint(text);
+
+    const reminder = buildReminder({
+      jid,
+      title,
+      body,
+      pattern: normalized.pattern,
+      stopAt: normalized.stopAt,
+    });
+    await saveReminder(reminder);
+    logger.info(
+      { title, pattern: normalized.pattern, stopAt: reminder.stopAt },
+      'Pengingat rutin interval dibuat',
+    );
+    return reminderSummary(reminder);
+  }
+
   return async function handle(message: IncomingMessage): Promise<void> {
     if (!isAllowed(message)) {
       logger.debug(
@@ -339,6 +451,28 @@ export function createHandler(getSocket: () => WASocket) {
 
     const payload = stripKeyword(message.text, Boolean(message.media));
     const sock = getSocket();
+
+    // Jalur pengingat WA murni: tidak lewat ekstraksi biasa, tidak menyentuh
+    // kalender. Hanya /inget yang membuka jalur ini supaya /catat & /ingatkan
+    // tetap berperilaku seperti dulu.
+    if (payload.kind === 'ok' && payload.keyword === REMINDER_KEYWORD) {
+      inFlight.add(messageId);
+      const log = logger.child({ from: message.senderPhone });
+      try {
+        await react(sock, message.raw, EMOJI.working);
+        const answer = await handleReminderRequest(payload.text, message.jid);
+        await react(sock, message.raw, EMOJI.reminder);
+        await reply(sock, message.raw, answer);
+        log.info({ text: payload.text.slice(0, 80) }, 'Pengingat rutin diproses');
+      } catch (error) {
+        log.error({ err: error }, 'Gagal memproses pengingat rutin');
+        await react(sock, message.raw, EMOJI.failed);
+        await reply(sock, message.raw, `❌ Gagal: ${userMessage(error)}`);
+      } finally {
+        inFlight.delete(messageId);
+      }
+      return;
+    }
 
     if (payload.kind === 'empty') {
       await react(sock, message.raw, EMOJI.ignored);
@@ -614,4 +748,29 @@ export function createHandler(getSocket: () => WASocket) {
       inFlight.delete(messageId);
     }
   };
+}
+
+/** Ringkasan pengingat rutin untuk balasan WhatsApp. */
+function reminderSummary(reminder: Reminder): string {
+  const schedule =
+    reminder.pattern.kind === 'interval'
+      ? `🔁 Tiap ${formatLead(reminder.pattern.intervalMinutes)}`
+      : `🔁 Tiap hari jam ${reminder.pattern.dailyAt}`;
+
+  return [
+    `⏰ *${reminder.title}*`,
+    schedule,
+    `🛑 Berhenti ${formatMoment(reminder.stopAt)} (bot berhenti setelah lewat itu)`,
+    `Kirim \`/inget batal ${reminder.title.toLowerCase().split(/\s+/).slice(0, 3).join(' ')}\` untuk berhenti lebih awal.`,
+  ].join('\n');
+}
+
+/** Cari pengingat aktif yang judulnya memuat semua kata yang disebut. */
+function matchActiveReminder(reminders: Reminder[], query: string): Reminder | undefined {
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+  if (words.length === 0) return undefined;
+  return reminders.find((reminder) => {
+    const title = reminder.title.toLowerCase();
+    return words.every((word) => title.includes(word));
+  });
 }

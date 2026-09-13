@@ -75,7 +75,14 @@ export const MEDIA_KEYWORD = '/simpan';
  */
 export const TASK_KEYWORD = '/tugas';
 
-const extraKeywords = [MEDIA_KEYWORD, TASK_KEYWORD].filter(
+/**
+ * Kata kunci pengingat WA murni: bot nge-WA berulang tiap N jam / tiap hari
+ * jam tertentu, tanpa menyentuh kalender CalDAV sama sekali. Dipatok di kode
+ * dengan alasan sama seperti dua kata kunci di atas.
+ */
+export const REMINDER_KEYWORD = '/inget';
+
+const extraKeywords = [MEDIA_KEYWORD, TASK_KEYWORD, REMINDER_KEYWORD].filter(
   (keyword) => !parsed.data.KEYWORDS.includes(keyword),
 );
 

@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
-import { config, MEDIA_KEYWORD, TASK_KEYWORD } from './config.js';
-import { describeAlarm, formatLead } from './duration.js';
+import { config, MEDIA_KEYWORD, REMINDER_KEYWORD, TASK_KEYWORD } from './config.js';
+import { describeAlarm } from './duration.js';
 import { formatBytes } from './media.js';
 import { readNotes, type Note } from './notes.js';
 import { formatMoment } from './time.js';
@@ -145,69 +145,53 @@ function newestFirst(notes: Note[]): Note[] {
 function helpText(): string {
   const write = config.KEYWORDS.map((keyword) => `\`${keyword}\``).join(' / ');
   const primary = config.KEYWORDS[0] ?? '/catat';
-  const fallback =
-    config.REMINDER_MINUTES_BEFORE > 0
-      ? `alarm ${formatLead(config.REMINDER_MINUTES_BEFORE)} sebelum acara`
-      : 'alarm tepat saat acara mulai';
 
   return [
-    '🤖 *wa-reminder* — catatan, kalender & pengingat tugas',
+    '🤖 *wa-reminder*',
     '',
     config.REQUIRE_KEYWORD
-      ? `Awali pesan dengan ${write}. Isinya bahasa bebas, tidak ada format baku.`
-      : 'Kata kunci sedang dimatikan: semua pesan yang masuk langsung diproses.',
+      ? `Awali pesan dengan ${write}.`
+      : 'Kata kunci dimatikan: semua pesan langsung diproses.',
     '',
-    `📝 \`${primary} wifi rumah 12345\``,
-    '   Tanpa waktu → cuma dicatat.',
+    `📝 \`${primary} wifi rumah 12345\` — catat`,
+    `📅 \`/ingatkan besok jam 3 meeting\` — ke Kalender HP`,
+    '   Atur alarm: `ingetin 2 jam sebelumnya`, `pas jamnya`.',
+    `🎯 \`${TASK_KEYWORD} laporan, deadline 20 Okt\` — bot nge-WA sebelum tenggat`,
+    '   Atur sendiri: `deadline 20 Okt, ingetin tiap jam`.',
+    `⏰ \`${REMINDER_KEYWORD} minum air tiap 2 jam\` — bot nge-WA rutin, tanpa kalender`,
+    `   Pola lain: \`tiap hari jam 6 pagi\`, \`tiap 30 menit\`. Berhenti: \`${REMINDER_KEYWORD} batal <nama>\``,
+    `💾 \`${MEDIA_KEYWORD} struk\` + foto/video — simpan berkasnya`,
     '',
-    '📅 `/ingatkan besok jam 3 sore meeting tim`',
-    `   Ada waktu → masuk Kalender HP, ${fallback}.`,
-    '   Atur sendiri: `ingetin 2 jam sebelumnya`, `alarm sehari sebelum`, `pas jamnya`.',
-    '',
-    `🎯 \`${TASK_KEYWORD} laporan PCV bikin game HSV, deadline 20 Oktober\``,
-    '   Tidak masuk kalender — bot yang nge-WA kamu beberapa kali sebelum tenggat,',
-    '   jaraknya ikut taksiran kesulitan tugasnya. Boleh beberapa baris sekaligus.',
-    '   Mau atur sendiri? Tambahkan polanya di belakang:',
-    `   \`${TASK_KEYWORD} project PCV, deadline 20 Okt, ingetin tiap jam\``,
-    `   \`${TASK_KEYWORD} laporan praktikum, deadline Jumat, tiap hari jam 8 pagi\``,
-    '   Tenggat wajib ada tanggalnya — kalau tidak, bot bakal nanya lewat chat.',
-    '',
-    `💾 Foto/video + keterangan \`${MEDIA_KEYWORD} struk belanja\` (maks ${config.MEDIA_MAX_MB} MB)`,
-    `   Hanya \`${MEDIA_KEYWORD}\` yang menyimpan berkasnya; kata kunci lain cuma mencatat teksnya.`,
-    `   Foto lama juga bisa: balas fotonya lalu tulis \`${MEDIA_KEYWORD}\`.`,
-    '',
-    '📖 `/list` · `/list 25` · `/cari wifi` · `/agenda` · `/bantuan`',
-    '',
-    'Reaksi: ⏳ diproses · 📅 kalender · 🎯 tugas · 📝 catatan · 💾 berkas · 📖 baca · 🤷 dilewat · ❌ gagal',
-    `🕒 ${config.TIMEZONE} · event kalender sampai ke HP lewat DAVx5.`,
+    '📖 `/list` · `/cari wifi` · `/agenda` · `/bantuan`',
   ].join('\n');
 }
 
 /** Balasan singkat kalau kata kunci dikirim tanpa isi, mis. hanya "/catat". */
 export function emptyPayloadHint(keyword: string): string {
+  if (keyword === REMINDER_KEYWORD) {
+    return [
+      `⏰ \`${keyword}\` masih kosong. Contoh:`,
+      `\`${keyword} minum air tiap 2 jam\``,
+      `\`${keyword} tiap hari jam 6 pagi minum obat\``,
+    ].join('\n');
+  }
+
   if (keyword === TASK_KEYWORD) {
     return [
-      `🎯 \`${keyword}\` masih kosong. Tulis tugas dan tenggatnya:`,
+      `🎯 \`${keyword}\` masih kosong. Contoh:`,
       `\`${keyword} laporan praktikum, dikumpul Jumat jam 5 sore\``,
-      `\`${keyword} project PCV bikin game HSV, push GitHub + README, deadline 20 Okt\``,
-      '',
-      'Boleh beberapa baris, dan boleh sekalian pola pengingatnya:',
-      `\`${keyword} laporan, deadline Jumat, ingetin tiap jam\``,
-      `\`${keyword} tugas, deadline 20 Okt, tiap hari jam 8 pagi\``,
-      '',
-      'Kalau tenggatnya belum jelas, bot bakal nanya lewat chat. Kirim `/bantuan` untuk daftar lengkap.',
+      `\`${keyword} tugas, deadline 20 Okt, ingetin tiap jam\``,
     ].join('\n');
   }
 
   return [
-    `✏️ \`${keyword}\` masih kosong. Tulis isinya setelah kata kunci:`,
+    `✏️ \`${keyword}\` masih kosong. Contoh:`,
     `\`${keyword} beli beras 5kg\``,
     '`/ingatkan besok jam 3 sore rapat, ingetin 1 jam sebelumnya`',
     '',
     keyword === MEDIA_KEYWORD
-      ? `Untuk menyimpan berkas, lampirkan foto atau video dengan keterangan \`${keyword}\`.`
-      : `Mau simpan foto/video? Pakai \`${MEDIA_KEYWORD}\` sebagai keterangannya.`,
-    'Kirim `/bantuan` untuk daftar lengkap.',
+      ? 'Lampirkan foto/video dengan keterangan itu untuk menyimpan berkasnya.'
+      : `Mau simpan foto/video? Pakai \`${MEDIA_KEYWORD}\`.`,
   ].join('\n');
 }
 

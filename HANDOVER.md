@@ -52,6 +52,12 @@ CalDAV (Radicale)     data/notes.jsonl     data/tasks.jsonl
         ↓  react 📅 / 🎯 / 📝 / 💾 / 🤷 / ❌ + balasan ringkas
         ↓
 HP: DAVx5 sync Radicale → event muncul di Kalender bawaan Android
+
+Jalur keempat, `/inget` (pengingat rutin): TIDAK lewat Gemini ekstraksi biasa —
+prompt khusus membaca polanya ("tiap 2 jam" / "tiap hari jam 6") →
+data/reminders.jsonl → penjadwal 60s yang sama → bot nge-WA user berulang
+sampai batas waktunya (default seminggu). Tanpa kalender sama sekali.
+`/inget daftar` & `/inget batal <nama>` dijawab tanpa Gemini.
 ```
 
 ### Kenapa Opsi B
@@ -90,11 +96,12 @@ Lokasi: `E:\Project\wa-reminder\server\`. Panduan pemakaian lengkap ada di
 | `src/caldav.ts` | build ICS (`ical-generator`) + `createCalendarObject` ke Radicale, cache kalender, `verifyConnection()` |
 | `src/notes.ts` | catatan JSONL append-only |
 | `src/tasks.ts` | `tasks.jsonl` (tulis ulang atomik + antrean serial), perencanaan lapisan pengingat dari skor kesulitan |
-| `src/scheduler.ts` | `setInterval` 60s: kirim lapisan yang jatuh tempo lewat `sendText()`, tutup tugas yang tenggatnya lewat, gagal kirim = tetap `pending` |
+| `src/reminders.ts` | `reminders.jsonl` (atomik + antrean serial): pengingat rutin `/inget` — bot nge-WA berulang (interval menit / tiap hari jam X) sampai `stopAt`, TANPA kalender; `nextFire()` hitung kirim berikutnya |
+| `src/scheduler.ts` | `setInterval` 60s: kirim lapisan tugas yang jatuh tempo lewat `sendText()`, tutup tugas yang tenggatnya lewat, kirim pengingat rutin `/inget`, gagal kirim = tetap `pending` |
 | `src/media.ts` | deteksi foto/video, unduh, simpan ke `data/media/<tahun-bulan>/` (hanya lewat `/simpan`) |
 | `src/duration.ts` | parsing "ingetin 2 jam sebelumnya", `formatLead()`, batas 7 hari |
 | `src/time.ts` | format tanggal Bahasa Indonesia + `now()` sesuai `TIMEZONE` |
-| `src/config.ts` | validasi env pakai zod v4, `isWhitelisted()` cocokkan **9 digit terakhir** biar `+6281…` = `081…`; `/simpan` & `/tugas` dipatok di kode |
+| `src/config.ts` | validasi env pakai zod v4, `isWhitelisted()` cocokkan **9 digit terakhir** biar `+6281…` = `081…`; `/simpan`, `/tugas`, `/inget` dipatok di kode |
 | `src/logger.ts` | pino + pino-pretty |
 | `Dockerfile`, `docker-compose.yml` | service bot + Radicale (`tomsquest/docker-radicale`), Radicale bind ke `127.0.0.1` saja |
 | `radicale/config/config` | htpasswd bcrypt, storage `/data/collections` |
@@ -112,6 +119,7 @@ bukan `latest` (`7.0.0-rc14`) karena rc belum stabil.
   → `skipped`+`done`, gagal kirim → tetap `pending` dan dicoba lagi
 - ❌ `/tugas` belum pernah diuji dengan Gemini sungguhan atau kirim WA sungguhan
 - ❌ Fitur media (`/simpan`) belum pernah diuji di produksi
+- ❌ `/inget` (pengingat rutin) baru lolos typecheck, belum pernah diuji sungguhan
 
 ### Toolchain PC user
 

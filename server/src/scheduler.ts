@@ -2,6 +2,12 @@ import { DateTime } from 'luxon';
 import { config } from './config.js';
 import { formatLead } from './duration.js';
 import { logger } from './logger.js';
+import {
+  nextFire,
+  readReminders,
+  updateReminder,
+  type Reminder,
+} from './reminders.js';
 import { readTasks, updateTask, type Task } from './tasks.js';
 import { formatMoment } from './time.js';
 import { sendText } from './whatsapp.js';
@@ -104,11 +110,71 @@ export async function sweepOnce(
   }
 }
 
+/** Isi pesan pengingat rutin. Tidak ada taksiran, cukup judul + detailnya. */
+function reminderPingText(reminder: Reminder): string {
+  const head = `⏰ *${reminder.title}*`;
+  const body = reminder.body.trim();
+  return body ? `${head}\n${body}` : head;
+}
+
+/**
+ * Sapu pengingat WA murni yang waktunya sudah tiba.
+ *
+ * Beda dari tugas: polanya berulang sampai `stopAt`, jadi setiap sapuan cukup
+ * tanya "kapan kirim berikutnya" — kalau jawabannya sudah lewat (termasuk saat
+ * server sempat mati), kirim sekarang dan tandai waktunya.
+ */
+export async function sweepReminders(
+  send: (jid: string, text: string) => Promise<void> = sendText,
+): Promise<void> {
+  const reminders = await readReminders();
+  const now = DateTime.now().setZone(config.TIMEZONE);
+
+  for (const reminder of reminders) {
+    if (reminder.status !== 'active') continue;
+
+    const stop = DateTime.fromISO(reminder.stopAt, { zone: config.TIMEZONE });
+    const invalid =
+      !stop.isValid ||
+      (reminder.pattern.kind === 'daily' &&
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(reminder.pattern.dailyAt));
+
+    if (invalid || now >= stop) {
+      await updateReminder(reminder.id, (item) => {
+        item.status = 'done';
+      });
+      log.info(
+        { reminderId: reminder.id, title: reminder.title, reason: invalid ? 'pola tidak valid' : 'masa berlaku habis' },
+        'pengingat rutin ditutup',
+      );
+      continue;
+    }
+
+    const fireAt = nextFire(reminder, now);
+    if (!fireAt || fireAt > now) continue;
+
+    try {
+      await send(reminder.jid, reminderPingText(reminder));
+    } catch (error) {
+      log.warn({ err: error, reminderId: reminder.id }, 'gagal kirim pengingat rutin, dicoba lagi nanti');
+      continue;
+    }
+
+    await updateReminder(reminder.id, (item) => {
+      item.lastSentAt = now.toISO() ?? '';
+    });
+    log.info({ reminderId: reminder.id, title: reminder.title }, 'pengingat rutin terkirim');
+  }
+}
+
 /** Jalankan sapuan berkala. Dipanggil sekali dari index.ts setelah WA siap. */
 export function startScheduler(): void {
   const tick = (): void => {
     void sweepOnce().catch((error) => {
       log.error({ err: error }, 'sapuan pengingat gagal');
+    });
+    void sweepReminders().catch((error) => {
+      log.error({ err: error }, 'sapuan pengingat rutin gagal');
     });
   };
 

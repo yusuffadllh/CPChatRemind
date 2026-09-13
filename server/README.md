@@ -5,13 +5,13 @@ pengingat tugas yang dikirim balik lewat WhatsApp.
 Untuk gambaran umum project, lihat [README utama](../README.md).
 
 ```
-Pesan WA → Baileys → react ⏳ → filter → [simpan foto/video] → Gemini → CalDAV / notes.jsonl / tasks.jsonl → react 📅 🎯 📝 💾 🤷 ❌
+Pesan WA → Baileys → react ⏳ → filter → [simpan foto/video] → Gemini → CalDAV / notes.jsonl / tasks.jsonl / reminders.jsonl → react 📅 🎯 📝 💾 🤷 ❌
                                                                                         ↓
-                                                       penjadwal tiap menit → pengingat tugas via WA
+                                                       penjadwal tiap menit → pengingat tugas & pengingat rutin via WA
 ```
 
 Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, `/note`,
-`/simpan`, atau `/tugas`.
+`/simpan`, `/tugas`, atau `/inget`.
 
 ## Perintah WhatsApp
 
@@ -21,6 +21,7 @@ Secara default bot hanya menanggapi pesan berawalan `/catat`, `/ingatkan`, `/not
 | `/ingatkan besok jam 3 sore rapat` | Buat event + alarm di kalender HP |
 | `/ingatkan besok jam 3 rapat, ingetin 2 jam sebelumnya` | Sama, tapi jam alarmnya diatur sendiri |
 | `/tugas laporan PCV, deadline 20 Okt` | Bot yang nge-WA kamu berlapis sebelum tenggat (bukan event) |
+| `/inget minum air tiap 2 jam` | Pengingat rutin: bot nge-WA berulang sampai batas waktunya, tanpa kalender |
 | foto/video + keterangan `/simpan struk` | Berkasnya ikut disimpan ke server, sekalian dicatat |
 | `/list` | 10 catatan terakhir; `/list 25` untuk lebih banyak (maks 30) |
 | `/cari wifi` | Cari di judul dan isi catatan |
@@ -95,6 +96,34 @@ Catatan penting:
   dipakai taksiran default 3/5 · 4 jam supaya pengingat tetap terjadwal.
 - Status pengingat disimpan di `data/tasks.jsonl`. Beda dari `notes.jsonl` yang
   append-only, berkas ini ditulis ulang setiap ada perubahan status.
+
+### Pengingat rutin (`/inget`)
+
+Yang ini murni bot → WA, sama sekali tidak menyentuh kalender: bot mengirim pesan
+berulang sampai batas waktunya. Cocok untuk kebiasaan atau pengecekan berkala,
+bukan untuk acara/tenggat.
+
+```
+/inget minum air tiap 2 jam
+/inget tiap hari jam 6 pagi minum obat
+/inget tiap 30 menit aduk adonan, sampai besok
+```
+
+Aturannya:
+
+- Pola waktunya dibaca Gemini: `tiap N menit/jam` → interval, atau
+  `tiap hari jam X` → harian. Dua pola disebut sekaligus, pola harian yang dipakai.
+- Tanpa batas waktu yang disebut, default berhenti **seminggu**; maksimal 365 hari.
+- Kalau polanya tidak kebaca, bot membalas contoh pemakaian — tidak ada pertanyaan
+  lanjutan seperti di `/tugas`, cukup kirim ulang dengan format yang lebih jelas.
+- `/inget daftar` menampilkan semua pengingat aktif,
+  `/inget batal <nama>` (alias `stop`/`hentikan`) menghentikannya lebih awal —
+  pencocokannya dari beberapa kata di judul, mis. `/inget batal minum air`.
+- Pengiriman lewat sapuan yang sama dengan tugas (tiap menit). Interval
+  dihitung dari kirim terakhir, jadi walau server mati sebentar jadwalnya tidak
+  molor terus; kalau lewat sejam, cukup satu pesan yang dikirim.
+- Statusnya disimpan di `data/reminders.jsonl`, ditulis ulang setiap terkirim
+  atau dihentikan.
 
 ### Menyimpan foto & video
 
@@ -324,7 +353,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | `ALLOW_SELF_CHAT` | `true` | Proses pesan dari chat ke nomor sendiri |
 | `WHITELIST` | kosong | Nomor lain yang diizinkan, dipisah koma. Format bebas (`+62…`, `08…`) — dicocokkan lewat 9 digit terakhir. Kosong = hanya self-chat |
 | `REQUIRE_KEYWORD` | `true` | Hanya proses pesan berawalan `KEYWORDS`. Set `false` kalau mau semua pesan dibaca |
-| `KEYWORDS` | `/catat,/ingatkan,/note` | Awalan yang diterima; dicocokkan tanpa peduli huruf besar-kecil, dan otomatis dibuang dari judul. `/simpan` dan `/tugas` selalu ikut walau tidak ditulis di sini |
+| `KEYWORDS` | `/catat,/ingatkan,/note` | Awalan yang diterima; dicocokkan tanpa peduli huruf besar-kecil, dan otomatis dibuang dari judul. `/simpan`, `/tugas`, dan `/inget` selalu ikut walau tidak ditulis di sini |
 
 **Foto & video**
 
@@ -357,7 +386,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 
 | Key | Default | Arti |
 | --- | --- | --- |
-| `DATA_DIR` | `./data` | Lokasi `auth/`, `notes.jsonl`, `tasks.jsonl`, dan `media/` |
+| `DATA_DIR` | `./data` | Lokasi `auth/`, `notes.jsonl`, `tasks.jsonl`, `reminders.jsonl`, dan `media/` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `BAILEYS_LOG_LEVEL` | `warn` | Log internal Baileys, dipisah karena sangat berisik |
 
@@ -373,7 +402,8 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 | [src/caldav.ts](src/caldav.ts) | Bangun ICS + `PUT` ke Radicale, cache kalender |
 | [src/notes.ts](src/notes.ts) | Catatan JSONL append-only |
 | [src/tasks.ts](src/tasks.ts) | Penyimpanan tugas + perencanaan lapisan pengingat |
-| [src/scheduler.ts](src/scheduler.ts) | Sapuan tiap menit: kirim pengingat yang jatuh tempo, tutup tugas kedaluwarsa |
+| [src/reminders.ts](src/reminders.ts) | Penyimpanan pengingat rutin `/inget` + hitung jadwal kirim berikutnya |
+| [src/scheduler.ts](src/scheduler.ts) | Sapuan tiap menit: kirim pengingat yang jatuh tempo, tutup tugas kedaluwarsa, kirim pengingat rutin |
 | [src/media.ts](src/media.ts) | Deteksi foto/video, unduh, simpan ke `data/media/` |
 | [src/time.ts](src/time.ts) | Format tanggal Bahasa Indonesia + "sekarang" sesuai `TIMEZONE` |
 | [src/config.ts](src/config.ts) | Validasi env dengan zod, pencocokan whitelist 9 digit akhir |
@@ -385,6 +415,7 @@ Butuh Radicale (atau server CalDAV lain) yang sudah hidup dan `CALDAV_URL` menun
 data/
   auth/            sesi WhatsApp — RAHASIA, setara akses penuh ke akunmu
   notes.jsonl      catatan, satu JSON per baris
+  reminders.jsonl  pengingat rutin `/inget` + waktu kirim terakhir (ditulis ulang saat berubah)
   tasks.jsonl      tugas + status tiap lapisan pengingat (ditulis ulang saat berubah)
   media/2026-09/   foto & video dari `/simpan`, dikelompokkan per bulan
 radicale/data/     penyimpanan kalender Radicale
@@ -403,7 +434,7 @@ radicale/config/
 | Bot berhenti dengan pesan sesi dicabut | Perangkat tertaut dihapus dari HP. Hapus `data/auth/` lalu scan QR lagi |
 | `Kalender "X" tidak ditemukan` | Nama `CALDAV_CALENDAR` tidak sama dengan di Radicale. Log menampilkan daftar yang tersedia |
 | Container gagal tulis ke `data/` | Bind mount belum di-`chown 1000:1000` |
-| Pesan tidak diproses sama sekali | Pesan harus berawalan `/catat`, `/ingatkan`, `/note`, `/simpan`, atau `/tugas` (default `REQUIRE_KEYWORD=true`). Cek juga `ALLOW_SELF_CHAT` / `WHITELIST` |
+| Pesan tidak diproses sama sekali | Pesan harus berawalan `/catat`, `/ingatkan`, `/note`, `/simpan`, `/tugas`, atau `/inget` (default `REQUIRE_KEYWORD=true`). Cek juga `ALLOW_SELF_CHAT` / `WHITELIST` |
 | Foto dikirim tapi berkasnya tidak tersimpan | Keterangannya harus diawali `/simpan`. Kata kunci lain sengaja hanya mencatat teksnya |
 | Audio/dokumen/stiker tidak tersimpan | Memang tidak didukung; hanya foto dan video yang diunduh |
 | Balasan `⚠️ Lampiran tidak tersimpan` | Berkas melewati `MEDIA_MAX_MB`, atau media lama sudah kedaluwarsa di server WA dan HP tidak bisa reupload |
@@ -411,6 +442,7 @@ radicale/config/
 | Waktu event ngawur | `TIMEZONE` salah, atau pesannya memang ambigu — cek `LOG_LEVEL=debug` untuk melihat hasil ekstraksi |
 | `/tugas` dibalas "belum bisa dijadwalkan" | Tenggatnya tidak punya tanggal (mis. "deadline UTS"). Kirim ulang dengan tanggal/hari yang jelas |
 | Pengingat tugas tidak pernah datang | Cek `sudo docker compose logs bot \| grep penjadwal`, lalu `cat data/tasks.jsonl` — kalau `status` sudah `done`, tenggatnya sudah lewat |
+| Pengingat `/inget` tidak pernah datang | Cek `cat data/reminders.jsonl` — `status: "done"` berarti masa berhentinya sudah lewat atau sudah dibatalkan. Pola waktunya juga bisa gagal kebaca; bot biasanya membalas contoh pemakaian saat itu terjadi |
 
 Log terstruktur: `docker compose logs -f bot`. Set `LOG_LEVEL=debug` untuk melihat JSON
 hasil ekstraksi Gemini per pesan.

@@ -207,6 +207,111 @@ export function parseLocal(value: string | null | undefined): DateTime | null {
   return parsed.isValid ? parsed : null;
 }
 
+// --- Ekstraksi pengingat WA berulang (/inget) --------------------------------
+
+export const reminderSchema = z.object({
+  title: z.string().default(''),
+  /** Detail tambahan yang ikut dikirim tiap pengingat; boleh kosong. */
+  note: z.string().nullish(),
+  /** Interval pengiriman dalam menit ("tiap 2 jam" = 120). */
+  interval_minutes: z.number().int().min(5).max(43200).nullish(),
+  /** Pengiriman tiap hari pada jam yang sama, format "HH:mm". */
+  daily_at: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'harus HH:mm')
+    .nullish(),
+  /** Kapan pengingatnya berhenti; null = default seminggu. */
+  datetime_stop: z.string().nullish(),
+  confidence: z.number().min(0).max(1).default(0),
+});
+
+export type ReminderExtraction = z.infer<typeof reminderSchema>;
+
+const REMINDER_PROMPT = `
+Kamu membantu bot WhatsApp membaca permintaan PENGINGAT BERULANG. Pengguna mau
+bot mengirim pesan ke dia berulang-ulang sampai suatu batas waktu. Ini BUKAN
+acara kalender dan BUKAN tugas dengan tenggat — murni pengingat rutin.
+
+Contoh pesan dan hasil yang diharapkan:
+- "ingetin minum air tiap 2 jam" -> interval_minutes 120.
+- "remind me tiap 30 menit buat ngaduk adonan" -> interval_minutes 30.
+- "ingetin tiap hari jam 6 pagi buat minum obat" -> daily_at "06:00".
+- "tiap malem jam 9 cek lampu motornya" -> daily_at "21:00".
+- "ingetin tiap 4 jam sampai minggu depan" -> interval_minutes 240,
+  datetime_stop kira-kira seminggu dari sekarang.
+- "ingetin jagain lauk tiap 3 jam sampe tanggal 20" -> interval_minutes 180,
+  datetime_stop "2026-09-20T23:59:00" (pakai tanggal yang dimaksud).
+
+Keluarkan:
+- "title": nama pengingatnya, singkat maksimal 60 karakter, Bahasa Indonesia,
+  tanpa kata "ingetin"/"remind". Contoh di atas -> "Minum air".
+- "note": detail tambahan yang pengguna sebut dan perlu ikut dikirim tiap kali
+  (dosis obat, langkah yang harus dicek). Kalau tidak ada, kosongkan.
+- "interval_minutes": MENIT antar pengiriman, hanya untuk pola "tiap N menit/
+  jam". "tiap 2 jam" -> 120. "tiap setengah jam" -> 30. Kalau polanya harian,
+  isi null.
+- "daily_at": "HH:mm" hanya untuk pola "tiap hari jam X". "pagi" 08:00,
+  "siang" 12:00, "sore" 16:00, "malam" 19:00 kalau jamnya tidak disebut persis.
+  Kalau polanya interval, isi null.
+  Pilih salah satu: interval_minutes ATAU daily_at, jangan keduanya.
+- "datetime_stop": kapan pengingatnya berhenti, format ISO-8601 waktu lokal
+  tanpa offset. "sampai besok" -> besok jam 23:59. "sampai Jumat" -> Jumat
+  23:59. "selamanya"/tanpa batas -> null. Kalau pengguna tidak menyebut
+  berhentinya sama sekali, isi null (bot akan pakai default seminggu).
+Jawab hanya JSON sesuai skema.
+`.trim();
+
+const reminderResponseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title: { type: Type.STRING },
+    note: { type: Type.STRING, nullable: true },
+    interval_minutes: { type: Type.NUMBER, nullable: true },
+    daily_at: { type: Type.STRING, nullable: true },
+    datetime_stop: { type: Type.STRING, nullable: true },
+    confidence: { type: Type.NUMBER },
+  },
+  required: ['title', 'confidence'],
+} as const;
+
+/**
+ * Baca permintaan pengingat WA berulang. Lempar Error kalau Gemini gagal;
+ * pemanggil bisa menyuruh pengguna mencoba lagi.
+ */
+export async function readReminderRequest(message: string): Promise<ReminderExtraction> {
+  const now = DateTime.now().setZone(config.TIMEZONE).setLocale('id');
+
+  const prompt = [
+    `Waktu sekarang: ${now.toFormat("cccc, dd LLLL yyyy HH:mm")} (${config.TIMEZONE})`,
+    `Hari ini: ${now.toISODate()}`,
+    '',
+    'Isi pesan WhatsApp:',
+    '"""',
+    message,
+    '"""',
+  ].join('\n');
+
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: config.GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: REMINDER_PROMPT,
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: reminderResponseSchema,
+      },
+    });
+  } catch (error) {
+    throw friendlyError(error);
+  }
+
+  const text = response.text?.trim();
+  if (!text) throw new Error('Gemini tidak mengembalikan teks');
+  return reminderSchema.parse(JSON.parse(text));
+}
+
 // --- Taksiran kesulitan tugas ------------------------------------------------
 
 /**
