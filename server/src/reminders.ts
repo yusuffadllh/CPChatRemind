@@ -138,22 +138,28 @@ export function buildReminder(input: {
 export function nextIntervalFire(reminder: Reminder, now: DateTime): DateTime | null {
   if (reminder.pattern.kind !== 'interval') return null;
   const stop = DateTime.fromISO(reminder.stopAt, { zone: config.TIMEZONE });
-  if (!stop.isValid || now >= stop) return null;
+  if (!stop.isValid || now > stop) return null;
 
   const last = reminder.lastSentAt ? DateTime.fromISO(reminder.lastSentAt, { zone: config.TIMEZONE }) : null;
+  const created = DateTime.fromISO(reminder.createdAt, { zone: config.TIMEZONE });
   // Belum pernah terkirim: kirim pada sapuan pertama setelah dibuat. Kalau
   // sudah, lanjut dari waktu terakhir + interval (bukan dari sekarang) supaya
   // driftnya tetap stabil walau server sempat mati.
-  const base = last && last.isValid ? last : now;
+  const base =
+    last && last.isValid
+      ? last
+      : created.isValid
+        ? created
+        : now;
   const next = base.plus({ minutes: reminder.pattern.intervalMinutes });
-  return next >= stop ? null : next;
+  return next > stop ? null : next;
 }
 
 /** Jadwal kirim berikutnya untuk pola harian; null kalau sudah lewat stopAt. */
 export function nextDailyFire(reminder: Reminder, now: DateTime): DateTime | null {
   if (reminder.pattern.kind !== 'daily') return null;
   const stop = DateTime.fromISO(reminder.stopAt, { zone: config.TIMEZONE });
-  if (!stop.isValid || now >= stop) return null;
+  if (!stop.isValid || now > stop) return null;
 
   const [hours, minutes] = reminder.pattern.dailyAt.split(':').map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
@@ -165,7 +171,7 @@ export function nextDailyFire(reminder: Reminder, now: DateTime): DateTime | nul
     millisecond: 0,
   });
   if (candidate <= now) candidate = candidate.plus({ days: 1 });
-  return candidate >= stop ? null : candidate;
+  return candidate > stop ? null : candidate;
 }
 
 /** Jadwal kirim berikutnya untuk pola apa pun; null berarti tidak ada lagi. */

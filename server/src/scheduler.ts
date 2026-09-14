@@ -139,7 +139,7 @@ export async function sweepReminders(
       (reminder.pattern.kind === 'daily' &&
         !/^([01]\d|2[0-3]):[0-5]\d$/.test(reminder.pattern.dailyAt));
 
-    if (invalid || now >= stop) {
+    if (invalid || now > stop) {
       await updateReminder(reminder.id, (item) => {
         item.status = 'done';
       });
