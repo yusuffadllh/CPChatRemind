@@ -14,8 +14,10 @@ import { sendText } from './whatsapp.js';
 
 const log = logger.child({ module: 'scheduler' });
 
-/** Sapuan tiap menit; presisi detik tidak penting untuk pengingat tugas. */
-const SWEEP_MS = 60_000;
+/** Cek tiap detik supaya pengingat tidak menunggu sampai menit berikutnya. */
+const SWEEP_MS = 1_000;
+/** Kirim sedikit lebih awal agar waktu di WhatsApp tidak lewat jadwal. */
+const SEND_EARLY_MS = 1_000;
 
 /** Isi pesan pengingat. Sengaja menyebut taksirannya biar salah taksir kelihatan. */
 function reminderText(task: Task, minutesLeft: number): string {
@@ -76,7 +78,7 @@ export async function sweepOnce(
     const due = task.layers.filter((layer) => {
       if (layer.status !== 'pending') return false;
       const at = DateTime.fromISO(layer.fireAt, { zone: config.TIMEZONE });
-      return at.isValid && at <= now;
+      return at.isValid && at.toMillis() - SEND_EARLY_MS <= now.toMillis();
     });
     if (due.length === 0) continue;
 
@@ -151,7 +153,7 @@ export async function sweepReminders(
     }
 
     const fireAt = nextFire(reminder, now);
-    if (!fireAt || fireAt > now) continue;
+    if (!fireAt || fireAt.toMillis() - SEND_EARLY_MS > now.toMillis()) continue;
 
     try {
       await send(reminder.jid, reminderPingText(reminder));
@@ -178,8 +180,14 @@ export function startScheduler(): void {
     });
   };
 
-  // unref supaya timer tidak menahan proses saat shutdown.
-  setInterval(tick, SWEEP_MS).unref();
-  log.info({ everySeconds: SWEEP_MS / 1000 }, 'penjadwal pengingat tugas aktif');
+  // Jalankan sekali saat scheduler aktif, lalu sejajarkan tick berikutnya ke
+  // detik penuh agar pemeriksaan waktunya konsisten.
   tick();
+  const delay = SWEEP_MS - (Date.now() % SWEEP_MS);
+  setTimeout(() => {
+    tick();
+    // unref supaya timer tidak menahan proses saat shutdown.
+    setInterval(tick, SWEEP_MS).unref();
+  }, delay).unref();
+  log.info({ everySeconds: SWEEP_MS / 1000 }, 'penjadwal pengingat tugas aktif');
 }

@@ -3,10 +3,11 @@ import { config, MEDIA_KEYWORD, REMINDER_KEYWORD, TASK_KEYWORD } from './config.
 import { describeAlarm } from './duration.js';
 import { formatBytes } from './media.js';
 import { readNotes, type Note } from './notes.js';
+import { readTasks, type Task } from './tasks.js';
 import { formatMoment } from './time.js';
 
 /** Batas baris supaya balasan WhatsApp tidak jadi tembok teks. */
-const DEFAULT_LIMIT = 10;
+const DEFAULT_LIMIT = 3;
 const MAX_LIMIT = 30;
 const BODY_PREVIEW = 120;
 
@@ -131,6 +132,24 @@ function renderList(heading: string, notes: Note[], empty: string): string {
   return `${heading}\n\n${body}`;
 }
 
+function renderActiveTasks(tasks: Task[]): string {
+  if (tasks.length === 0) return '🎯 Tidak ada tugas yang belum selesai.';
+
+  return [
+    `🎯 *${tasks.length} tugas belum selesai*`,
+    ...tasks.map((task, index) => {
+      const next = task.layers
+        .filter((layer) => layer.status === 'pending')
+        .sort((a, b) => a.fireAt.localeCompare(b.fireAt))[0];
+      return [
+        `${index + 1}. *${task.title}*`,
+        `   ⏰ Tenggat ${formatMoment(task.deadline)}`,
+        next ? `   🔔 Berikutnya ${formatMoment(next.fireAt)}` : '   🔔 Tidak ada pengingat tersisa',
+      ].join('\n');
+    }),
+  ].join('\n');
+}
+
 function limitFrom(argument: string): number {
   const parsed = Number.parseInt(argument, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_LIMIT;
@@ -162,7 +181,7 @@ function helpText(): string {
     `   Pola lain: \`tiap hari jam 6 pagi\`, \`tiap 30 menit\`. Berhenti: \`${REMINDER_KEYWORD} batal <nama>\``,
     `💾 \`${MEDIA_KEYWORD} struk\` + foto/video — simpan berkasnya`,
     '',
-    '📖 `/list` · `/cari wifi` · `/agenda` · `/bantuan`',
+    '📖 `/list` (3 catatan terakhir + tugas belum selesai) · `/cari wifi` · `/agenda` · `/bantuan`',
   ].join('\n');
 }
 
@@ -201,13 +220,15 @@ export async function runCommand(command: Command): Promise<string> {
   const notes = await readNotes();
 
   if (command.name === 'list') {
-    const limit = limitFrom(command.argument);
+    const tasks = (await readTasks()).filter((task) => task.status === 'active');
+    const limit = command.argument ? limitFrom(command.argument) : DEFAULT_LIMIT;
     const picked = newestFirst(notes).slice(0, limit);
-    return renderList(
+    const notesText = renderList(
       `📋 *${picked.length} catatan terakhir* (total ${notes.length})`,
       picked,
-      '📭 Belum ada catatan. Kirim `/catat ...` untuk mulai.',
+      '📭 Belum ada catatan.',
     );
+    return `${renderActiveTasks(tasks)}\n\n${notesText}`;
   }
 
   if (command.name === 'cari') {
