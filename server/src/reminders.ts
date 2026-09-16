@@ -164,13 +164,35 @@ export function nextDailyFire(reminder: Reminder, now: DateTime): DateTime | nul
   const [hours, minutes] = reminder.pattern.dailyAt.split(':').map(Number);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
 
-  let candidate = now.startOf('day').set({
+  const atTime = (day: DateTime): DateTime => day.set({
     hour: hours,
     minute: minutes,
     second: 0,
     millisecond: 0,
   });
-  if (candidate <= now) candidate = candidate.plus({ days: 1 });
+
+  const created = DateTime.fromISO(reminder.createdAt, { zone: config.TIMEZONE });
+  const lastSent = reminder.lastSentAt
+    ? DateTime.fromISO(reminder.lastSentAt, { zone: config.TIMEZONE })
+    : null;
+
+  let candidate: DateTime;
+  if (lastSent?.isValid) {
+    // After a successful send, the next occurrence is tomorrow. Do not base
+    // this on `now`: a sweep that runs at 07:55:20 must not skip today's 07:55
+    // occurrence before it has been sent.
+    candidate = atTime(lastSent.startOf('day').plus({ days: 1 }));
+  } else if (created.isValid) {
+    // A newly-created reminder may be swept a few seconds after its scheduled
+    // minute. Keep today's occurrence due if it was created before that time;
+    // if it was created after that time, start tomorrow instead.
+    const today = atTime(created.startOf('day'));
+    candidate = today >= created ? today : atTime(created.startOf('day').plus({ days: 1 }));
+  } else {
+    candidate = atTime(now.startOf('day'));
+    if (candidate <= now) candidate = atTime(now.startOf('day').plus({ days: 1 }));
+  }
+
   return candidate > stop ? null : candidate;
 }
 
