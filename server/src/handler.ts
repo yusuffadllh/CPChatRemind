@@ -264,7 +264,9 @@ export function createHandler(getSocket: () => WASocket) {
       const schedule =
         reminder.pattern.kind === 'interval'
           ? `tiap ${formatLead(reminder.pattern.intervalMinutes)}`
-          : `tiap hari jam ${reminder.pattern.dailyAt}`;
+          : reminder.pattern.kind === 'daily'
+            ? `tiap hari jam ${reminder.pattern.dailyAt}`
+            : `sekali pada ${formatMoment(reminder.pattern.fireAt)}`;
       return `${index + 1}. *${reminder.title}* — ${schedule}, berhenti ${formatMoment(reminder.stopAt)}`;
     });
     return [`⏰ *${reminders.length} pengingat rutin aktif*`, '', ...rows].join('\n');
@@ -308,6 +310,22 @@ export function createHandler(getSocket: () => WASocket) {
     // Tanpa batas yang disebut: seminggu, cukup lama buat kebiasaan baru dan
     // tidak spam selamanya kalau pengguna lupa menghentikannya.
     const effectiveStop = stop ?? now.plus({ days: 7 });
+
+    if (result.datetime_at && !result.daily_at && !result.interval_minutes) {
+      const onceAt = parseLocal(result.datetime_at);
+      if (!onceAt || onceAt <= now) return reminderHint(text);
+
+      const reminder = buildReminder({
+        jid,
+        title,
+        body,
+        pattern: { kind: 'once', fireAt: onceAt.toISO() ?? '' },
+        stopAt: onceAt,
+      });
+      await saveReminder(reminder);
+      logger.info({ title, fireAt: onceAt.toISO() }, 'Pengingat satu kali dibuat');
+      return reminderSummary(reminder);
+    }
 
     if (result.daily_at && !result.interval_minutes) {
       const daily = /^([01]\d|2[0-3]):[0-5]\d$/.test(result.daily_at) ? result.daily_at : null;
@@ -755,7 +773,9 @@ function reminderSummary(reminder: Reminder): string {
   const schedule =
     reminder.pattern.kind === 'interval'
       ? `🔁 Tiap ${formatLead(reminder.pattern.intervalMinutes)}`
-      : `🔁 Tiap hari jam ${reminder.pattern.dailyAt}`;
+      : reminder.pattern.kind === 'daily'
+        ? `🔁 Tiap hari jam ${reminder.pattern.dailyAt}`
+        : `🔔 Sekali pada ${formatMoment(reminder.pattern.fireAt)}`;
 
   return [
     `⏰ *${reminder.title}*`,

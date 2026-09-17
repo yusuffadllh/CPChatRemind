@@ -139,9 +139,12 @@ export async function sweepReminders(
     const invalid =
       !stop.isValid ||
       (reminder.pattern.kind === 'daily' &&
-        !/^([01]\d|2[0-3]):[0-5]\d$/.test(reminder.pattern.dailyAt));
+        !/^([01]\d|2[0-3]):[0-5]\d$/.test(reminder.pattern.dailyAt)) ||
+      (reminder.pattern.kind === 'once' &&
+        !DateTime.fromISO(reminder.pattern.fireAt, { zone: config.TIMEZONE }).isValid);
 
-    if (invalid || now > stop) {
+    const expired = reminder.pattern.kind !== 'once' && now > stop;
+    if (invalid || expired) {
       await updateReminder(reminder.id, (item) => {
         item.status = 'done';
       });
@@ -164,6 +167,7 @@ export async function sweepReminders(
 
     await updateReminder(reminder.id, (item) => {
       item.lastSentAt = now.toISO() ?? '';
+      if (item.pattern.kind === 'once') item.status = 'done';
     });
     log.info({ reminderId: reminder.id, title: reminder.title }, 'pengingat rutin terkirim');
   }

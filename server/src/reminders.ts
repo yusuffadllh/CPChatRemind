@@ -21,8 +21,12 @@ export interface Reminder {
    * Pola pengiriman:
    * - "interval": setiap `intervalMinutes` menit.
    * - "daily": setiap hari jam `dailyAt` (HH:mm, zona TIMEZONE).
+   * - "once": satu kali pada `fireAt`.
    */
-  pattern: { kind: 'interval'; intervalMinutes: number } | { kind: 'daily'; dailyAt: string };
+  pattern:
+    | { kind: 'interval'; intervalMinutes: number }
+    | { kind: 'daily'; dailyAt: string }
+    | { kind: 'once'; fireAt: string };
   /** ISO bertimezone. Pengiriman berhenti setelah lewat waktu ini. */
   stopAt: string;
   createdAt: string;
@@ -196,9 +200,16 @@ export function nextDailyFire(reminder: Reminder, now: DateTime): DateTime | nul
   return candidate > stop ? null : candidate;
 }
 
+/** Jadwal kirim satu kali; null setelah sudah terkirim atau waktunya invalid. */
+export function nextOnceFire(reminder: Reminder): DateTime | null {
+  if (reminder.pattern.kind !== 'once' || reminder.lastSentAt) return null;
+  const fireAt = DateTime.fromISO(reminder.pattern.fireAt, { zone: config.TIMEZONE });
+  return fireAt.isValid ? fireAt : null;
+}
+
 /** Jadwal kirim berikutnya untuk pola apa pun; null berarti tidak ada lagi. */
 export function nextFire(reminder: Reminder, now: DateTime): DateTime | null {
-  return reminder.pattern.kind === 'interval'
-    ? nextIntervalFire(reminder, now)
-    : nextDailyFire(reminder, now);
+  if (reminder.pattern.kind === 'interval') return nextIntervalFire(reminder, now);
+  if (reminder.pattern.kind === 'daily') return nextDailyFire(reminder, now);
+  return nextOnceFire(reminder);
 }

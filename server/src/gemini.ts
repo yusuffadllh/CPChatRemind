@@ -220,6 +220,8 @@ export const reminderSchema = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'harus HH:mm')
     .nullish(),
+  /** Waktu pengiriman satu kali; kosong untuk pola berulang. */
+  datetime_at: z.string().nullish(),
   /** Kapan pengingatnya berhenti; null = default seminggu. */
   datetime_stop: z.string().nullish(),
   confidence: z.number().min(0).max(1).default(0),
@@ -230,9 +232,18 @@ export type ReminderExtraction = z.infer<typeof reminderSchema>;
 const REMINDER_PROMPT = `
 Kamu membantu bot WhatsApp membaca permintaan PENGINGAT BERULANG. Pengguna mau
 bot mengirim pesan ke dia berulang-ulang sampai suatu batas waktu. Ini BUKAN
-acara kalender dan BUKAN tugas dengan tenggat — murni pengingat rutin.
+acara kalender dan BUKAN tugas dengan tenggat — murni pengingat lewat WA.
+
+Bedakan pengingat satu kali dan berulang:
+- Jika pengguna menyebut waktu tertentu tanpa kata "tiap" atau "setiap hari",
+  isi datetime_at dengan ISO lokal lengkap dan kosongkan daily_at serta
+  interval_minutes. Contoh "jam 21.35 malam ini" berarti kirim satu kali
+  pada 21:35 hari ini.
+- Isi daily_at hanya untuk permintaan yang jelas berulang setiap hari.
+- Isi interval_minutes hanya untuk pola "tiap N menit/jam".
 
 Contoh pesan dan hasil yang diharapkan:
+- "ingatkan bangunin Talita jam 21.35 malam ini" -> datetime_at "2026-09-17T21:35:00", daily_at null, interval_minutes null.
 - "ingetin minum air tiap 2 jam" -> interval_minutes 120.
 - "remind me tiap 30 menit buat ngaduk adonan" -> interval_minutes 30.
 - "ingetin tiap hari jam 6 pagi buat minum obat" -> daily_at "06:00".
@@ -254,6 +265,8 @@ Keluarkan:
   "siang" 12:00, "sore" 16:00, "malam" 19:00 kalau jamnya tidak disebut persis.
   Kalau polanya interval, isi null.
   Pilih salah satu: interval_minutes ATAU daily_at, jangan keduanya.
+- "datetime_at": waktu pengiriman satu kali, format ISO-8601 lokal tanpa
+  offset. Isi hanya jika pengguna meminta satu kali pada waktu tertentu.
 - "datetime_stop": kapan pengingatnya berhenti, format ISO-8601 waktu lokal
   tanpa offset. "sampai besok" -> besok jam 23:59. "sampai Jumat" -> Jumat
   23:59. "selamanya"/tanpa batas -> null. Kalau pengguna tidak menyebut
@@ -268,6 +281,7 @@ const reminderResponseSchema = {
     note: { type: Type.STRING, nullable: true },
     interval_minutes: { type: Type.NUMBER, nullable: true },
     daily_at: { type: Type.STRING, nullable: true },
+    datetime_at: { type: Type.STRING, nullable: true },
     datetime_stop: { type: Type.STRING, nullable: true },
     confidence: { type: Type.NUMBER },
   },
